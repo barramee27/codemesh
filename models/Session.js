@@ -60,5 +60,6 @@ sessionSchema.pre('save', function (next) {
 });
 
 sessionSchema.index({ owner: 1, updatedAt: -1 });
+sessionSchema.index({ 'collaborators.user': 1 });
 
 module.exports = mongoose.model('Session', sessionSchema);

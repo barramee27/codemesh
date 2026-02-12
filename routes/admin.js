@@ -14,7 +14,8 @@ router.get('/users', async (req, res) => {
     try {
         const users = await User.find()
             .select('username email role banned createdAt')
-            .sort({ createdAt: -1 });
+            .sort({ createdAt: -1 })
+            .lean();
 
         // Count sessions per user
         const usersWithStats = await Promise.all(users.map(async (u) => {
@@ -92,7 +93,8 @@ router.get('/sessions', async (req, res) => {
         const sessions = await Session.find()
             .populate('owner', 'username email')
             .sort({ updatedAt: -1 })
-            .limit(100);
+            .limit(100)
+            .lean();
         res.json(sessions);
     } catch (err) {
         console.error('Admin list sessions error:', err);

@@ -460,16 +460,18 @@
         return view;
     }
 
-    // ─── Local Changes → Server ───
+    // ─── Local Changes → Server (batched for performance) ───
+    let pendingLocalOps = [];
+    let localBatchTimer = null;
+    const LOCAL_BATCH_MS = 30; // Buffer rapid edits for 30ms
+
     function handleLocalChange(update) {
         if (!state.socket || !state.currentSession) return;
 
         update.changes.iterChanges((fromA, toA, fromB, toB, inserted) => {
-            const ops = [];
-
             // Delete operation
             if (toA > fromA) {
-                ops.push({
+                pendingLocalOps.push({
                     type: 'delete',
                     pos: fromA,
                     count: toA - fromA
@@ -479,21 +481,28 @@
             // Insert operation
             const insertedText = inserted.toString();
             if (insertedText.length > 0) {
-                ops.push({
+                pendingLocalOps.push({
                     type: 'insert',
                     pos: fromA,
                     text: insertedText
                 });
             }
-
-            ops.forEach(op => {
-                state.socket.emit('code-change', {
-                    sessionId: state.currentSession,
-                    op,
-                    version: state.serverVersion
-                });
-            });
         });
+
+        // Batch ops and send after a short delay
+        if (!localBatchTimer) {
+            localBatchTimer = setTimeout(() => {
+                const opsToSend = pendingLocalOps.splice(0);
+                opsToSend.forEach(op => {
+                    state.socket.emit('code-change', {
+                        sessionId: state.currentSession,
+                        op,
+                        version: state.serverVersion
+                    });
+                });
+                localBatchTimer = null;
+            }, LOCAL_BATCH_MS);
+        }
 
         // Update save status
         setSaveStatus('unsaved');
@@ -501,31 +510,52 @@
         state.saveTimer = setTimeout(() => manualSave(), 5000);
     }
 
-    // ─── Remote Changes → Editor ───
+    // ─── Remote Changes → Editor (batched for performance) ───
+    let pendingRemoteOps = [];
+    let remoteBatchTimer = null;
+    const REMOTE_BATCH_MS = 16; // ~1 frame at 60fps
+
     function applyRemoteChange(op) {
         if (!state.editorView) return;
 
-        const { EditorView } = cmModules;
-        state.isApplyingRemote = true;
+        pendingRemoteOps.push(op);
 
-        try {
-            const doc = state.editorView.state.doc;
-            let changes;
+        // Batch multiple remote ops into a single editor transaction
+        if (!remoteBatchTimer) {
+            remoteBatchTimer = requestAnimationFrame(() => {
+                if (!state.editorView || pendingRemoteOps.length === 0) {
+                    remoteBatchTimer = null;
+                    return;
+                }
 
-            if (op.type === 'insert') {
-                const pos = Math.min(op.pos, doc.length);
-                changes = { from: pos, insert: op.text };
-            } else if (op.type === 'delete') {
-                const from = Math.min(op.pos, doc.length);
-                const to = Math.min(op.pos + op.count, doc.length);
-                changes = { from, to };
-            }
-
-            if (changes) {
-                state.editorView.dispatch({ changes });
-            }
-        } finally {
-            state.isApplyingRemote = false;
+                state.isApplyingRemote = true;
+                try {
+                    const changes = [];
+                    for (const remoteOp of pendingRemoteOps) {
+                        const doc = state.editorView.state.doc;
+                        if (remoteOp.type === 'insert') {
+                            const pos = Math.min(remoteOp.pos, doc.length);
+                            changes.push({ from: pos, insert: remoteOp.text });
+                        } else if (remoteOp.type === 'delete') {
+                            const from = Math.min(remoteOp.pos, doc.length);
+                            const to = Math.min(remoteOp.pos + remoteOp.count, doc.length);
+                            changes.push({ from, to });
+                        }
+                    }
+                    if (changes.length > 0) {
+                        // Apply all changes in one transaction
+                        state.editorView.dispatch({ changes: changes[0] });
+                        // Apply remaining one by one (positions shift after each)
+                        for (let i = 1; i < changes.length; i++) {
+                            state.editorView.dispatch({ changes: changes[i] });
+                        }
+                    }
+                } finally {
+                    state.isApplyingRemote = false;
+                    pendingRemoteOps = [];
+                    remoteBatchTimer = null;
+                }
+            });
         }
     }
 
@@ -618,7 +648,11 @@
             state.socket.disconnect();
         }
 
-        state.socket = io({ transports: ['websocket'] });
+        state.socket = io({
+            transports: ['websocket'],
+            reconnectionAttempts: 5,
+            reconnectionDelay: 1000
+        });
 
         state.socket.on('connect', () => {
             state.socket.emit('join-session', {
@@ -710,12 +744,18 @@
             showToast(data.message, 'error');
         });
 
+        // Handle session full error
+        state.socket.on('join-error', (data) => {
+            showToast(data.message, 'error');
+            loadDashboard();
+        });
+
         state.socket.on('disconnect', () => {
-            showToast('Disconnected from server', 'error');
+            showToast('Disconnected — reconnecting...', 'error');
         });
 
         state.socket.on('connect_error', () => {
-            showToast('Connection error', 'error');
+            showToast('Connection error — retrying...', 'error');
         });
     }
 

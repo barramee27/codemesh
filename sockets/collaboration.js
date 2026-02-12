@@ -6,6 +6,15 @@ const activeSessions = new Map();
 // Map of sessionId -> save timeout
 const saveTimers = new Map();
 
+// ─── Performance constants ───
+const MAX_USERS_PER_SESSION = 50;
+const SAVE_DEBOUNCE_MS = 3000;
+const SESSION_CLEANUP_DELAY_MS = 5000;
+const SESSION_FINAL_CLEANUP_MS = 3000;
+const HISTORY_MAX = 200;
+const HISTORY_TRIM_TO = 100;
+const CURSOR_THROTTLE_MS = 100;
+
 function getOrCreateSessionState(sessionId) {
     if (!activeSessions.has(sessionId)) {
         activeSessions.set(sessionId, {
@@ -45,8 +54,30 @@ function scheduleSave(sessionId) {
             console.error(`Auto-save error for ${sessionId}:`, err.message);
         }
         saveTimers.delete(sessionId);
-    }, 3000)); // save 3s after last change
+    }, SAVE_DEBOUNCE_MS));
 }
+
+// ─── Save all active sessions immediately (for graceful shutdown) ───
+async function saveAllSessions() {
+    const promises = [];
+    for (const [sessionId, state] of activeSessions.entries()) {
+        // Clear any pending save timer
+        if (saveTimers.has(sessionId)) {
+            clearTimeout(saveTimers.get(sessionId));
+            saveTimers.delete(sessionId);
+        }
+        promises.push(
+            Session.findOneAndUpdate(
+                { sessionId },
+                { $set: { code: state.doc, language: state.language, updatedAt: Date.now() } }
+            ).catch(err => console.error(`Shutdown save error for ${sessionId}:`, err.message))
+        );
+    }
+    await Promise.all(promises);
+}
+
+// Per-socket cursor throttle tracking
+const cursorTimestamps = new Map(); // socketId -> last cursor broadcast time
 
 module.exports = function setupCollaboration(io) {
     io.on('connection', (socket) => {
@@ -55,12 +86,20 @@ module.exports = function setupCollaboration(io) {
             const { sessionId, username, userId } = data;
             if (!sessionId) return;
 
+            const state = getOrCreateSessionState(sessionId);
+
+            // ─── Connection limit check ───
+            if (state.users.size >= MAX_USERS_PER_SESSION) {
+                socket.emit('join-error', {
+                    message: `Session is full (max ${MAX_USERS_PER_SESSION} users). Please try again later.`
+                });
+                return;
+            }
+
             socket.join(sessionId);
             socket.sessionId = sessionId;
             socket.username = username || 'Anonymous';
             socket.userId = userId || null;
-
-            const state = getOrCreateSessionState(sessionId);
 
             // Load from DB if fresh
             let dbSession = null;
@@ -163,12 +202,12 @@ module.exports = function setupCollaboration(io) {
             transformedOp.version = state.version;
             state.history.push(transformedOp);
 
-            // Keep history bounded
-            if (state.history.length > 500) {
-                state.history = state.history.slice(-250);
+            // ─── Optimized history cap ───
+            if (state.history.length > HISTORY_MAX) {
+                state.history = state.history.slice(-HISTORY_TRIM_TO);
             }
 
-            // Broadcast to others in the session
+            // Broadcast to others in the session (sender already has the change)
             socket.to(sessionId).emit('remote-change', {
                 op: transformedOp,
                 version: state.version,
@@ -234,6 +273,7 @@ module.exports = function setupCollaboration(io) {
             });
         });
 
+        // ─── Cursor updates with server-side throttling ───
         socket.on('cursor-update', (data) => {
             const { sessionId, cursor } = data;
             if (!sessionId) return;
@@ -245,6 +285,12 @@ module.exports = function setupCollaboration(io) {
             if (user) {
                 user.cursor = cursor;
             }
+
+            // Throttle cursor broadcasts to prevent flooding
+            const now = Date.now();
+            const lastBroadcast = cursorTimestamps.get(socket.id) || 0;
+            if (now - lastBroadcast < CURSOR_THROTTLE_MS) return;
+            cursorTimestamps.set(socket.id, now);
 
             socket.to(sessionId).emit('cursor-moved', {
                 socketId: socket.id,
@@ -273,6 +319,9 @@ module.exports = function setupCollaboration(io) {
             const sessionId = socket.sessionId;
             if (!sessionId) return;
 
+            // Clean up cursor throttle tracking
+            cursorTimestamps.delete(socket.id);
+
             const state = activeSessions.get(sessionId);
             if (state) {
                 state.users.delete(socket.id);
@@ -282,7 +331,7 @@ module.exports = function setupCollaboration(io) {
                     username: socket.username
                 });
 
-                // Cleanup empty sessions after delay
+                // ─── Faster empty session cleanup ───
                 if (state.users.size === 0) {
                     setTimeout(() => {
                         const currentState = activeSessions.get(sessionId);
@@ -294,11 +343,14 @@ module.exports = function setupCollaboration(io) {
                                 if (final && final.users.size === 0) {
                                     activeSessions.delete(sessionId);
                                 }
-                            }, 5000);
+                            }, SESSION_FINAL_CLEANUP_MS);
                         }
-                    }, 10000);
+                    }, SESSION_CLEANUP_DELAY_MS);
                 }
             }
         });
     });
+
+    // Return saveAllSessions for graceful shutdown
+    return { saveAllSessions };
 };

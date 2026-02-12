@@ -57,7 +57,8 @@ router.get('/', authMiddleware, async (req, res) => {
         })
             .populate('owner', 'username')
             .sort({ updatedAt: -1 })
-            .limit(50);
+            .limit(50)
+            .lean();
 
         res.json(sessions);
     } catch (err) {
