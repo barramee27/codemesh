@@ -775,8 +775,9 @@
 
             // Update UI
             document.getElementById('editor-session-title').textContent = sessionData.title;
-            document.getElementById('editor-session-id').textContent = `ID: ${sessionId}`;
+            document.getElementById('editor-session-id').textContent = `${sessionId}`;
             document.getElementById('language-selector').value = sessionData.language || 'javascript';
+            document.getElementById('statusbar-lang').textContent = document.getElementById('language-selector').options[document.getElementById('language-selector').selectedIndex].text;
 
             // Clear and create editor
             container.innerHTML = '';
@@ -985,6 +986,11 @@
         state.editorView = createEditor(container, doc, lang);
         updateRemoteSelections(); // Restore selections
         renderFileTree(); // Update file extension
+        
+        const langSelect = document.getElementById('language-selector');
+        if(langSelect) {
+            document.getElementById('statusbar-lang').textContent = langSelect.options[langSelect.selectedIndex].text;
+        }
     }
 
     // ─── File Tree & Layout Setup ───
@@ -1186,7 +1192,7 @@
             document.getElementById('copy-session-link').click();
         });
 
-        document.getElementById('save-session-btn').addEventListener('click', () => {
+        document.getElementById('statusbar-save').addEventListener('click', () => {
             manualSave();
         });
 

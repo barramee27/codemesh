@@ -1067,6 +1067,34 @@ select.input-full {
     display: flex;
     flex-direction: column;
     height: 100vh;
+    background: #1e1e1e;
+    color: #cccccc;
+    font-family: var(--font-sans);
+}
+
+.vscode-titlebar {
+    height: 35px;
+    background: #323233;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 10px;
+    flex-shrink: 0;
+    border-bottom: 1px solid #1e1e1e;
+    user-select: none;
+}
+
+.vscode-titlebar-center {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+}
+
+.vscode-titlebar-right {
+    display: flex;
+    align-items: center;
+    gap: 10px;
 }
 
 .vscode-body {
@@ -1178,11 +1206,59 @@ select.input-full {
     background: #1e1e1e;
 }
 
-.editor-tabs {
+.vscode-tabs-container {
     display: flex;
     background: #252526;
     height: 35px;
+    flex-shrink: 0;
+}
+
+.editor-tabs {
+    display: flex;
+    flex: 1;
     overflow-x: auto;
+}
+
+.editor-tabs::-webkit-scrollbar {
+    height: 2px;
+}
+
+.vscode-editor-actions {
+    display: flex;
+    align-items: center;
+    padding: 0 10px;
+    gap: 8px;
+}
+
+.vscode-select {
+    background: transparent;
+    border: none;
+    color: #ccc;
+    font-size: 12px;
+    cursor: pointer;
+    outline: none;
+}
+
+.vscode-select option {
+    background: #252526;
+}
+
+.vscode-action-btn {
+    background: transparent;
+    border: none;
+    color: #ccc;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    border-radius: 4px;
+}
+
+.vscode-action-btn:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: #fff;
 }
 
 .editor-tab {
@@ -1234,6 +1310,104 @@ select.input-full {
     flex: 1;
     min-width: 0;
     background: #1e1e1e;
+}
+
+.vscode-panel {
+    height: 30%;
+    min-height: 150px;
+    background: #1e1e1e;
+    border-top: 1px solid #444;
+    display: flex;
+    flex-direction: column;
+    flex-shrink: 0;
+}
+
+.vscode-panel-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+    padding: 0 10px;
+    border-bottom: 1px solid #444;
+}
+
+.vscode-panel-tabs {
+    display: flex;
+    gap: 15px;
+}
+
+.vscode-panel-tab {
+    font-size: 11px;
+    color: #858585;
+    padding: 8px 0;
+    cursor: pointer;
+    text-transform: uppercase;
+}
+
+.vscode-panel-tab:hover {
+    color: #ccc;
+}
+
+.vscode-panel-tab.active {
+    color: #e7e7e7;
+    border-bottom: 1px solid #e7e7e7;
+}
+
+.vscode-panel-actions {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding-bottom: 4px;
+}
+
+.vscode-statusbar {
+    height: 22px;
+    background: #007acc;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 12px;
+    color: #fff;
+    padding: 0 10px;
+    flex-shrink: 0;
+}
+
+.statusbar-left,
+.statusbar-right {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.statusbar-item {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    cursor: pointer;
+}
+
+.statusbar-item:hover {
+    background: rgba(255, 255, 255, 0.1);
+}
+
+.output-content {
+    flex: 1;
+    overflow: auto;
+    padding: 10px;
+    font-family: var(--font-mono);
+    font-size: 13px;
+    line-height: 1.6;
+    color: #ccc;
+    white-space: pre-wrap;
+    word-break: break-all;
+    margin: 0;
+}
+
+.preview-iframe {
+    flex: 1;
+    width: 100%;
+    min-height: 0;
+    border: none;
+    background: #fff;
 }
 
 /* Comments Sidebar */
