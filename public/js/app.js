@@ -19,7 +19,9 @@
         isApplyingRemote: false,
         saveTimer: null,
         users: new Map(),
-        userRole: 'editor' // 'owner' | 'editor' | 'viewer'
+        userRole: 'editor', // 'owner' | 'editor' | 'viewer'
+        comments: [],
+        remoteCursors: new Map() // track remote selections
     };
 
     // ─── API Helper ───
@@ -353,16 +355,19 @@
     // ─── CodeMirror Editor ───
     let cmModulesLoaded = false;
     let cmModules = {};
+    let remoteSelectionEffect;
+    let remoteSelectionField;
+    let CursorWidgetClass;
 
     async function loadCodeMirror() {
         if (cmModulesLoaded) return;
 
         // Load CodeMirror ESM modules from CDN
         const [
-            { EditorState },
+            { EditorState, StateField, StateEffect },
             { EditorView, keymap, lineNumbers, highlightActiveLineGutter, highlightSpecialChars,
                 drawSelection, dropCursor, rectangularSelection, crosshairCursor,
-                highlightActiveLine },
+                highlightActiveLine, Decoration, WidgetType, gutter },
             { defaultHighlightStyle, syntaxHighlighting, indentOnInput, bracketMatching,
                 foldGutter, foldKeymap, LanguageDescription },
             { defaultKeymap, history, historyKeymap, indentWithTab },
@@ -400,8 +405,8 @@
         ]);
 
         cmModules = {
-            EditorState, EditorView, keymap, lineNumbers, highlightActiveLineGutter,
-            highlightSpecialChars, drawSelection, dropCursor, rectangularSelection,
+            EditorState, StateField, StateEffect, EditorView, keymap, lineNumbers, highlightActiveLineGutter,
+            highlightSpecialChars, drawSelection, dropCursor, rectangularSelection, Decoration, WidgetType, gutter,
             crosshairCursor, highlightActiveLine, defaultHighlightStyle,
             syntaxHighlighting, indentOnInput, bracketMatching, foldGutter, foldKeymap,
             defaultKeymap, history, historyKeymap, indentWithTab,
@@ -433,6 +438,71 @@
         return (langMap[lang] || langMap.javascript)();
     }
 
+    function getRemoteSelectionExtension() {
+        const { StateField, StateEffect, EditorView, Decoration, WidgetType } = cmModules;
+
+        if (!remoteSelectionEffect) {
+            remoteSelectionEffect = StateEffect.define();
+            
+            class CursorWidget extends WidgetType {
+                constructor(color, username) {
+                    super();
+                    this.color = color;
+                    this.username = username;
+                }
+                toDOM() {
+                    const wrap = document.createElement("span");
+                    wrap.className = "cm-remote-cursor";
+                    wrap.style.borderColor = this.color;
+                    const tooltip = document.createElement("span");
+                    tooltip.className = "cm-remote-cursor-tooltip";
+                    tooltip.style.backgroundColor = this.color;
+                    tooltip.textContent = this.username;
+                    wrap.appendChild(tooltip);
+                    return wrap;
+                }
+            }
+            CursorWidgetClass = CursorWidget;
+
+            remoteSelectionField = StateField.define({
+                create() { return Decoration.none; },
+                update(decos, tr) {
+                    decos = decos.map(tr.changes);
+                    for (let e of tr.effects) {
+                        if (e.is(remoteSelectionEffect)) {
+                            return e.value;
+                        }
+                    }
+                    return decos;
+                },
+                provide: f => EditorView.decorations.from(f)
+            });
+        }
+        return remoteSelectionField;
+    }
+
+    function getCommentGutter() {
+        const { gutter } = cmModules;
+        return gutter({
+            class: "cm-comment-gutter",
+            lineMarker(view, line) {
+                const lineNo = view.state.doc.lineAt(line.from).number;
+                const hasComment = state.comments.some(c => c.line === lineNo);
+                if (hasComment) {
+                    return new (class {
+                        toDOM() {
+                            const marker = document.createElement("div");
+                            marker.className = "cm-comment-marker";
+                            marker.title = "View comments";
+                            return marker;
+                        }
+                    })();
+                }
+                return null;
+            }
+        });
+    }
+
     function createEditor(container, doc, language) {
         const {
             EditorState, EditorView, keymap, lineNumbers, highlightActiveLineGutter,
@@ -441,7 +511,7 @@
             syntaxHighlighting, indentOnInput, bracketMatching, foldGutter, foldKeymap,
             defaultKeymap, history, historyKeymap, indentWithTab,
             closeBrackets, closeBracketsKeymap, autocompletion, completionKeymap,
-            searchKeymap, highlightSelectionMatches, oneDark
+            searchKeymap, highlightSelectionMatches, oneDark, gutter
         } = cmModules;
 
         const updateListener = EditorView.updateListener.of((update) => {
@@ -453,9 +523,25 @@
             }
         });
 
+        // Add click listener for line comments
+        const commentClickListener = EditorView.domEventHandlers({
+            mousedown(event, view) {
+                // Click on line number or our comment gutter
+                if (event.target.classList.contains('cm-lineNumbers') || 
+                    event.target.closest('.cm-lineNumbers') ||
+                    event.target.classList.contains('cm-comment-gutter') ||
+                    event.target.closest('.cm-comment-gutter')) {
+                    const pos = view.posAtDOM(event.target);
+                    const line = view.state.doc.lineAt(pos);
+                    openCommentDialog(line.number);
+                }
+            }
+        });
+
         const editorState = EditorState.create({
             doc,
             extensions: [
+                getCommentGutter(),
                 lineNumbers(),
                 highlightActiveLineGutter(),
                 highlightSpecialChars(),
@@ -473,6 +559,8 @@
                 crosshairCursor(),
                 highlightActiveLine(),
                 highlightSelectionMatches(),
+                getRemoteSelectionExtension(),
+                commentClickListener,
                 keymap.of([
                     ...closeBracketsKeymap,
                     ...defaultKeymap,
@@ -605,11 +693,14 @@
         if (!state.socket || !state.currentSession) return;
         clearTimeout(cursorTimer);
         cursorTimer = setTimeout(() => {
-            const pos = update.state.selection.main.head;
+            const main = update.state.selection.main;
+            const pos = main.head;
             const line = update.state.doc.lineAt(pos);
+            
             state.socket.emit('cursor-update', {
                 sessionId: state.currentSession,
-                cursor: { line: line.number, ch: pos - line.from }
+                cursor: { line: line.number, ch: pos - line.from },
+                selection: { from: main.from, to: main.to, head: main.head }
             });
         }, 50);
     }
@@ -729,6 +820,10 @@
             state.userRole = data.role || 'editor';
             updateRoleBadge(state.userRole);
 
+            if (data.comments) {
+                state.comments = data.comments;
+            }
+
             const container = document.getElementById('editor-container');
             container.innerHTML = '';
 
@@ -752,6 +847,21 @@
             }
 
             setSaveStatus('saved');
+            renderFileTree(); // Render static file tree
+        });
+
+        state.socket.on('comment-added', (comment) => {
+            state.comments.push(comment);
+            if (state.activeCommentLine === comment.line) {
+                renderComments(comment.line);
+            }
+            // re-render the gutter by forcing an update (hacky but works)
+            if (state.editorView) {
+                state.editorView.dispatch({
+                    changes: { from: 0, to: 0, insert: '' }
+                });
+            }
+            showToast('New comment on line ' + comment.line, 'info');
         });
 
         state.socket.on('remote-change', (data) => {
@@ -769,14 +879,22 @@
             showToast(`${data.username} joined`, 'info');
         });
 
+        state.socket.on('cursor-moved', (data) => {
+            const user = state.users.get(data.socketId);
+            if (user) {
+                if (data.cursor) user.cursor = data.cursor;
+                if (data.selection) user.selection = data.selection;
+            } else {
+                state.users.set(data.socketId, { username: data.username, cursor: data.cursor, selection: data.selection, color: '#6C5CE7' });
+            }
+            updateRemoteSelections();
+        });
+
         state.socket.on('user-left', (data) => {
             state.users.delete(data.socketId);
             updateCollaboratorsList();
+            updateRemoteSelections();
             showToast(`${data.username} left`, 'info');
-        });
-
-        state.socket.on('cursor-moved', (data) => {
-            // Remote cursor updates could be visualized here
         });
 
         state.socket.on('language-changed', (data) => {
@@ -819,6 +937,42 @@
         });
     }
 
+    // ─── Remote Selections Render ───
+    function updateRemoteSelections() {
+        if (!state.editorView || !cmModulesLoaded) return;
+        const { Decoration } = cmModules;
+
+        const decos = [];
+        state.users.forEach((user, id) => {
+            if (!user.selection) return;
+            const from = Math.min(user.selection.from, state.editorView.state.doc.length);
+            const to = Math.min(user.selection.to, state.editorView.state.doc.length);
+            const head = Math.min(user.selection.head, state.editorView.state.doc.length);
+
+            // Selection background
+            if (from !== to) {
+                decos.push(Decoration.mark({ class: "cm-remote-selection" }).range(Math.min(from, to), Math.max(from, to)));
+            }
+            
+            // Cursor widget
+            if (CursorWidgetClass) {
+                decos.push(Decoration.widget({
+                    widget: new CursorWidgetClass(user.color || '#6C5CE7', user.username),
+                    side: 1
+                }).range(head));
+            }
+        });
+
+        // Sort decorations by position as required by CM6
+        decos.sort((a, b) => a.from - b.from);
+
+        if (remoteSelectionEffect) {
+            state.editorView.dispatch({
+                effects: remoteSelectionEffect.of(Decoration.set(decos))
+            });
+        }
+    }
+
     // ─── Reconfigure Language ───
     function reconfigureLanguage(lang) {
         if (!state.editorView || !cmModulesLoaded) return;
@@ -829,6 +983,68 @@
 
         state.editorView.destroy();
         state.editorView = createEditor(container, doc, lang);
+        updateRemoteSelections(); // Restore selections
+        renderFileTree(); // Update file extension
+    }
+
+    // ─── File Tree & Layout Setup ───
+    function renderFileTree() {
+        const fileTree = document.getElementById('file-tree');
+        const lang = document.getElementById('language-selector').value || 'javascript';
+        // Mock a single file for now
+        const extMap = { javascript: '.js', python: '.py', html: '.html', css: '.css', typescript: '.ts', java: '.java', cpp: '.cpp', csharp: '.cs', go: '.go', rust: '.rs', php: '.php', ruby: '.rb', sql: '.sql', markdown: '.md' };
+        const ext = extMap[lang] || '.txt';
+        
+        // Simple file icon coloring based on language
+        let iconColor = '#519aba'; // default ts/js blue
+        if (lang === 'html') iconColor = '#e34c26';
+        if (lang === 'css') iconColor = '#264de4';
+        if (lang === 'python') iconColor = '#3572A5';
+        if (lang === 'java') iconColor = '#b07219';
+
+        fileTree.innerHTML = `
+            <div class="file-item active">
+                <svg class="file-icon" viewBox="0 0 16 16" fill="${iconColor}"><path d="M13.71 4.29l-3-3L10 1H4a1 1 0 00-1 1v12a1 1 0 001 1h8a1 1 0 001-1V5l-.29-.71zM10 2.41L12.59 5H10V2.41zM4 14V2h5v4h4v8H4z"/></svg>
+                main${ext}
+            </div>
+        `;
+
+        const tabs = document.getElementById('editor-tabs');
+        tabs.innerHTML = `
+            <div class="editor-tab active">
+                <svg class="file-icon" viewBox="0 0 16 16" fill="${iconColor}" style="margin-right: 6px; width: 14px; height: 14px;"><path d="M13.71 4.29l-3-3L10 1H4a1 1 0 00-1 1v12a1 1 0 001 1h8a1 1 0 001-1V5l-.29-.71zM10 2.41L12.59 5H10V2.41zM4 14V2h5v4h4v8H4z"/></svg>
+                main${ext}
+                <div class="tab-close">✕</div>
+            </div>
+        `;
+    }
+
+    // ─── Comments System ───
+    function openCommentDialog(line) {
+        state.activeCommentLine = line;
+        const sidebar = document.getElementById('comments-sidebar');
+        document.getElementById('comments-line-num').textContent = line;
+        sidebar.style.display = 'flex';
+        renderComments(line);
+    }
+
+    function renderComments(line) {
+        const list = document.getElementById('comments-list');
+        const comments = state.comments.filter(c => c.line === line);
+        
+        if (comments.length === 0) {
+            list.innerHTML = '<div style="color:#888; font-size:12px; padding:10px;">No comments on this line yet.</div>';
+        } else {
+            list.innerHTML = comments.map(c => `
+                <div class="comment-item">
+                    <div class="comment-author">${escapeHtml(c.author)}</div>
+                    <div class="comment-text">${escapeHtml(c.text)}</div>
+                </div>
+            `).join('');
+        }
+        
+        // scroll to bottom
+        list.scrollTop = list.scrollHeight;
     }
 
     // ─── Update Collaborators List ───
@@ -950,17 +1166,18 @@
         document.getElementById('copy-session-link').addEventListener('click', () => {
             const id = state.currentSession;
             if (id) {
-                navigator.clipboard.writeText(id).then(() => {
-                    showToast('Session ID copied to clipboard!', 'success');
+                const url = window.location.origin + '/' + id;
+                navigator.clipboard.writeText(url).then(() => {
+                    showToast('Session link copied to clipboard!', 'success');
                 }).catch(() => {
                     // Fallback
                     const input = document.createElement('input');
-                    input.value = id;
+                    input.value = url;
                     document.body.appendChild(input);
                     input.select();
                     document.execCommand('copy');
                     input.remove();
-                    showToast('Session ID copied!', 'success');
+                    showToast('Session link copied!', 'success');
                 });
             }
         });
@@ -1003,6 +1220,32 @@
             if ((e.ctrlKey || e.metaKey) && e.key === 'Enter' && state.currentView === 'editor') {
                 e.preventDefault();
                 runCode();
+            }
+        });
+
+        // ─── Comment Events ───
+        document.getElementById('close-comments-btn').addEventListener('click', () => {
+            document.getElementById('comments-sidebar').style.display = 'none';
+            state.activeCommentLine = null;
+        });
+
+        document.getElementById('submit-comment-btn').addEventListener('click', () => {
+            const input = document.getElementById('new-comment-input');
+            const text = input.value.trim();
+            if (text && state.activeCommentLine !== null && state.socket) {
+                state.socket.emit('add-comment', {
+                    sessionId: state.currentSession,
+                    line: state.activeCommentLine,
+                    text
+                });
+                input.value = '';
+            }
+        });
+
+        document.getElementById('new-comment-input').addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                document.getElementById('submit-comment-btn').click();
             }
         });
     }

@@ -13,6 +13,22 @@ const collaboratorSchema = new mongoose.Schema({
     }
 }, { _id: false });
 
+const fileSchema = new mongoose.Schema({
+    id: String,
+    name: String,
+    content: String,
+    language: String
+}, { _id: false });
+
+const commentSchema = new mongoose.Schema({
+    id: String,
+    fileId: String,
+    line: Number,
+    text: String,
+    author: String,
+    createdAt: { type: Date, default: Date.now }
+}, { _id: false });
+
 const sessionSchema = new mongoose.Schema({
     sessionId: {
         type: String,
@@ -26,6 +42,7 @@ const sessionSchema = new mongoose.Schema({
         trim: true,
         default: 'Untitled Session'
     },
+    // Keep old fields for backward compatibility, but use files array mostly
     language: {
         type: String,
         default: 'javascript'
@@ -34,6 +51,8 @@ const sessionSchema = new mongoose.Schema({
         type: String,
         default: ''
     },
+    files: [fileSchema],
+    comments: [commentSchema],
     owner: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'User',

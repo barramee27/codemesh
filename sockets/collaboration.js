@@ -21,8 +21,9 @@ function getOrCreateSessionState(sessionId) {
             doc: '',
             version: 0,
             history: [],
-            users: new Map(), // socketId -> { username, color, cursor, userId, role }
-            language: 'javascript'
+            users: new Map(), // socketId -> { username, color, cursor, selection, userId, role }
+            language: 'javascript',
+            comments: [] // { id, line, text, author, timestamp }
         });
     }
     return activeSessions.get(sessionId);
@@ -157,7 +158,8 @@ module.exports = function setupCollaboration(io) {
                 version: state.version,
                 language: state.language,
                 users: Object.fromEntries(state.users),
-                role: userRole
+                role: userRole,
+                comments: state.comments
             });
 
             // Notify others
@@ -275,7 +277,7 @@ module.exports = function setupCollaboration(io) {
 
         // ─── Cursor updates with server-side throttling ───
         socket.on('cursor-update', (data) => {
-            const { sessionId, cursor } = data;
+            const { sessionId, cursor, selection } = data;
             if (!sessionId) return;
 
             const state = activeSessions.get(sessionId);
@@ -283,7 +285,8 @@ module.exports = function setupCollaboration(io) {
 
             const user = state.users.get(socket.id);
             if (user) {
-                user.cursor = cursor;
+                if (cursor) user.cursor = cursor;
+                if (selection) user.selection = selection;
             }
 
             // Throttle cursor broadcasts to prevent flooding
@@ -295,8 +298,31 @@ module.exports = function setupCollaboration(io) {
             socket.to(sessionId).emit('cursor-moved', {
                 socketId: socket.id,
                 username: socket.username,
-                cursor
+                cursor,
+                selection
             });
+        });
+
+        // ─── Comments ───
+        socket.on('add-comment', (data) => {
+            const { sessionId, line, text } = data;
+            if (!sessionId || !text) return;
+
+            const state = activeSessions.get(sessionId);
+            if (!state) return;
+
+            const comment = {
+                id: Math.random().toString(36).substring(2, 9),
+                line,
+                text,
+                author: socket.username,
+                timestamp: new Date().toISOString()
+            };
+
+            state.comments.push(comment);
+            
+            // Broadcast to everyone in the session
+            io.to(sessionId).emit('comment-added', comment);
         });
 
         socket.on('language-change', (data) => {
