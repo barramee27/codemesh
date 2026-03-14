@@ -345,9 +345,11 @@
         <div class="sidebar-section">
           <div class="sidebar-section-header">
             <svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M4.5 5L8 8.5 11.5 5h-7z"/></svg>
-            <span class="section-title">WORKSPACE</span>
-            <button class="btn btn-icon btn-xs" id="new-file-btn" title="New File" style="display:none">
-              <svg viewBox="0 0 16 16" fill="currentColor"><path d="M8 2v12M2 8h12" stroke="currentColor" stroke-width="2"/></svg>
+            <span class="section-title" style="flex:1;">WORKSPACE</span>
+            <button class="btn btn-icon btn-xs" id="create-file-action" title="New File" style="background:none;border:none;cursor:pointer;opacity:0.8;color:inherit;">
+              <svg viewBox="0 0 16 16" fill="currentColor" width="14" height="14">
+                <path fill-rule="evenodd" d="M2 1.75C2 .784 2.784 0 3.75 0h6.586a.25.25 0 01.177.073l2.664 2.664a.25.25 0 01.073.177V14.25A1.75 1.75 0 0111.5 16h-7.75A1.75 1.75 0 012 14.25V1.75zm1.75-.25a.25.25 0 00-.25.25v12.5c0 .138.112.25.25.25h7.75a.25.25 0 00.25-.25V4.664a.25.25 0 00-.073-.177l-2.664-2.664a.25.25 0 00-.177-.073H3.75zM8 5a.75.75 0 01.75.75v1.5h1.5a.75.75 0 010 1.5h-1.5v1.5a.75.75 0 01-1.5 0v-1.5h-1.5a.75.75 0 010-1.5h1.5v-1.5A.75.75 0 018 5z"/>
+              </svg>
             </button>
           </div>
           <div class="file-tree" id="file-tree">
@@ -442,19 +444,19 @@
           </div>
           <pre id="output-content" class="output-content"></pre>
         </div>
-
-        <!-- VS Code Status Bar -->
-        <div class="vscode-statusbar">
-          <div class="statusbar-left">
-            <span class="statusbar-item" style="background:#007acc; padding:0 10px; color:#fff; font-weight:bold;">CodeMesh</span>
-            <span class="statusbar-item"><svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 2a6 6 0 100 12A6 6 0 008 2zM3.5 8a4.5 4.5 0 119 0 4.5 4.5 0 01-9 0z"/></svg> Live</span>
-            <span class="statusbar-item" id="statusbar-save" style="cursor:pointer" title="Click to manually save"><svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M4 2v12h8V4l-2-2H4zm2 2h2v4H6V4zm-1 6h6v3H5v-3z"/></svg> Auto-saving</span>
-          </div>
-          <div class="statusbar-right">
-            <span class="statusbar-item">UTF-8</span>
-            <span class="statusbar-item" id="statusbar-lang">JavaScript</span>
-          </div>
-        </div>
+      </div>
+    </div>
+    
+    <!-- VS Code Status Bar -->
+    <div class="vscode-statusbar">
+      <div class="statusbar-left">
+        <span class="statusbar-item" style="background:#007acc; padding:0 10px; color:#fff; font-weight:bold;">CodeMesh</span>
+        <span class="statusbar-item"><svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 2a6 6 0 100 12A6 6 0 008 2zM3.5 8a4.5 4.5 0 119 0 4.5 4.5 0 01-9 0z"/></svg> Live</span>
+        <span class="statusbar-item" id="statusbar-save" style="cursor:pointer" title="Click to manually save"><svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M4 2v12h8V4l-2-2H4zm2 2h2v4H6V4zm-1 6h6v3H5v-3z"/></svg> Auto-saving</span>
+      </div>
+      <div class="statusbar-right">
+        <span class="statusbar-item">UTF-8</span>
+        <span class="statusbar-item" id="statusbar-lang">JavaScript</span>
       </div>
     </div>
   </div>

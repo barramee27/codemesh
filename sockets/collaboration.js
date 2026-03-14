@@ -18,12 +18,10 @@ const CURSOR_THROTTLE_MS = 100;
 function getOrCreateSessionState(sessionId) {
     if (!activeSessions.has(sessionId)) {
         activeSessions.set(sessionId, {
-            doc: '',
-            version: 0,
-            history: [],
-            users: new Map(), // socketId -> { username, color, cursor, selection, userId, role }
-            language: 'javascript',
-            comments: [] // { id, line, text, author, timestamp }
+            files: new Map(), // fileId -> { doc, version, history }
+            users: new Map(), // socketId -> { username, color, cursor, selection, userId, role, activeFileId }
+            language: 'javascript', // Default fallback
+            comments: [] // { id, fileId, line, text, author, timestamp }
         });
     }
     return activeSessions.get(sessionId);
@@ -46,10 +44,18 @@ function scheduleSave(sessionId) {
     saveTimers.set(sessionId, setTimeout(async () => {
         const state = activeSessions.get(sessionId);
         if (!state) return;
+        
         try {
+            const filesToSave = Array.from(state.files.entries()).map(([id, fileData]) => ({
+                id,
+                name: fileData.name,
+                content: fileData.doc,
+                language: fileData.language
+            }));
+
             await Session.findOneAndUpdate(
                 { sessionId },
-                { $set: { code: state.doc, language: state.language, updatedAt: Date.now() } }
+                { $set: { files: filesToSave, updatedAt: Date.now() } }
             );
         } catch (err) {
             console.error(`Auto-save error for ${sessionId}:`, err.message);
@@ -62,15 +68,22 @@ function scheduleSave(sessionId) {
 async function saveAllSessions() {
     const promises = [];
     for (const [sessionId, state] of activeSessions.entries()) {
-        // Clear any pending save timer
         if (saveTimers.has(sessionId)) {
             clearTimeout(saveTimers.get(sessionId));
             saveTimers.delete(sessionId);
         }
+        
+        const filesToSave = Array.from(state.files.entries()).map(([id, fileData]) => ({
+            id,
+            name: fileData.name,
+            content: fileData.doc,
+            language: fileData.language
+        }));
+
         promises.push(
             Session.findOneAndUpdate(
                 { sessionId },
-                { $set: { code: state.doc, language: state.language, updatedAt: Date.now() } }
+                { $set: { files: filesToSave, updatedAt: Date.now() } }
             ).catch(err => console.error(`Shutdown save error for ${sessionId}:`, err.message))
         );
     }
@@ -108,8 +121,29 @@ module.exports = function setupCollaboration(io) {
                 try {
                     dbSession = await Session.findOne({ sessionId });
                     if (dbSession) {
-                        state.doc = dbSession.code || '';
-                        state.language = dbSession.language || 'javascript';
+                        // Migrate legacy single-file sessions to multi-file
+                        if (!dbSession.files || dbSession.files.length === 0) {
+                            const defaultFileId = 'main_file';
+                            state.files.set(defaultFileId, {
+                                id: defaultFileId,
+                                name: 'main.js',
+                                doc: dbSession.code || '',
+                                language: dbSession.language || 'javascript',
+                                version: 0,
+                                history: []
+                            });
+                        } else {
+                            dbSession.files.forEach(f => {
+                                state.files.set(f.id, {
+                                    id: f.id,
+                                    name: f.name,
+                                    doc: f.content || '',
+                                    language: f.language || 'javascript',
+                                    version: 0,
+                                    history: []
+                                });
+                            });
+                        }
                     }
                 } catch (err) {
                     console.error('Load session error:', err.message);
@@ -147,16 +181,28 @@ module.exports = function setupCollaboration(io) {
             state.users.set(socket.id, {
                 username: socket.username,
                 color: userColor,
-                cursor: { line: 0, ch: 0 },
+                cursor: null,
+                selection: null,
                 userId: userId,
-                role: userRole
+                role: userRole,
+                activeFileId: null
+            });
+
+            // Format files map for client
+            const clientFiles = {};
+            state.files.forEach((data, id) => {
+                clientFiles[id] = {
+                    id: data.id,
+                    name: data.name,
+                    doc: data.doc,
+                    language: data.language,
+                    version: data.version
+                };
             });
 
             // Send current state to joining client
             socket.emit('session-state', {
-                doc: state.doc,
-                version: state.version,
-                language: state.language,
+                files: clientFiles,
                 users: Object.fromEntries(state.users),
                 role: userRole,
                 comments: state.comments
@@ -172,11 +218,14 @@ module.exports = function setupCollaboration(io) {
         });
 
         socket.on('code-change', (data) => {
-            const { sessionId, op, version } = data;
-            if (!sessionId) return;
+            const { sessionId, fileId, op, version } = data;
+            if (!sessionId || !fileId) return;
 
             const state = activeSessions.get(sessionId);
             if (!state) return;
+
+            const file = state.files.get(fileId);
+            if (!file) return;
 
             // Check if user is a viewer — reject edits
             const userInfo = state.users.get(socket.id);
@@ -189,8 +238,8 @@ module.exports = function setupCollaboration(io) {
 
             // Transform against concurrent ops if needed
             let transformedOp = { ...op, clientId: socket.id };
-            if (version < state.version) {
-                const missed = state.history.slice(version);
+            if (version < file.version) {
+                const missed = file.history.slice(version);
                 for (const pastOp of missed) {
                     if (pastOp.clientId === socket.id) continue;
                     transformedOp = transformOp(transformedOp, pastOp);
@@ -199,28 +248,86 @@ module.exports = function setupCollaboration(io) {
             }
 
             // Apply to server doc
-            state.doc = applyOp(state.doc, transformedOp);
-            state.version++;
-            transformedOp.version = state.version;
-            state.history.push(transformedOp);
+            file.doc = applyOp(file.doc, transformedOp);
+            file.version++;
+            transformedOp.version = file.version;
+            file.history.push(transformedOp);
 
             // ─── Optimized history cap ───
-            if (state.history.length > HISTORY_MAX) {
-                state.history = state.history.slice(-HISTORY_TRIM_TO);
+            if (file.history.length > HISTORY_MAX) {
+                file.history = file.history.slice(-HISTORY_TRIM_TO);
             }
 
             // Broadcast to others in the session (sender already has the change)
             socket.to(sessionId).emit('remote-change', {
+                fileId,
                 op: transformedOp,
-                version: state.version,
+                version: file.version,
                 userId: socket.id
             });
 
             // Acknowledge to sender
-            socket.emit('ack', { version: state.version });
+            socket.emit('ack', { fileId, version: file.version });
 
             // Schedule auto-save
             scheduleSave(sessionId);
+        });
+
+        // ─── File Management ───
+        socket.on('create-file', (data) => {
+            const { sessionId, name, language } = data;
+            if (!sessionId || !name) return;
+
+            const state = activeSessions.get(sessionId);
+            if (!state) return;
+
+            const fileId = 'file_' + Math.random().toString(36).substring(2, 9);
+            
+            state.files.set(fileId, {
+                id: fileId,
+                name: name,
+                doc: '',
+                language: language || 'javascript',
+                version: 0,
+                history: []
+            });
+
+            io.to(sessionId).emit('file-created', {
+                id: fileId,
+                name: name,
+                doc: '',
+                language: language || 'javascript'
+            });
+            scheduleSave(sessionId);
+        });
+
+        socket.on('delete-file', (data) => {
+            const { sessionId, fileId } = data;
+            if (!sessionId || !fileId) return;
+
+            const state = activeSessions.get(sessionId);
+            if (!state) return;
+
+            if (state.files.has(fileId)) {
+                state.files.delete(fileId);
+                io.to(sessionId).emit('file-deleted', { fileId });
+                scheduleSave(sessionId);
+            }
+        });
+
+        socket.on('rename-file', (data) => {
+            const { sessionId, fileId, newName } = data;
+            if (!sessionId || !fileId || !newName) return;
+
+            const state = activeSessions.get(sessionId);
+            if (!state) return;
+
+            const file = state.files.get(fileId);
+            if (file) {
+                file.name = newName;
+                io.to(sessionId).emit('file-renamed', { fileId, newName });
+                scheduleSave(sessionId);
+            }
         });
 
         // Owner/admin can change a user's role live
@@ -277,8 +384,8 @@ module.exports = function setupCollaboration(io) {
 
         // ─── Cursor updates with server-side throttling ───
         socket.on('cursor-update', (data) => {
-            const { sessionId, cursor, selection } = data;
-            if (!sessionId) return;
+            const { sessionId, fileId, cursor, selection } = data;
+            if (!sessionId || !fileId) return;
 
             const state = activeSessions.get(sessionId);
             if (!state) return;
@@ -287,6 +394,7 @@ module.exports = function setupCollaboration(io) {
             if (user) {
                 if (cursor) user.cursor = cursor;
                 if (selection) user.selection = selection;
+                user.activeFileId = fileId;
             }
 
             // Throttle cursor broadcasts to prevent flooding
@@ -298,6 +406,7 @@ module.exports = function setupCollaboration(io) {
             socket.to(sessionId).emit('cursor-moved', {
                 socketId: socket.id,
                 username: socket.username,
+                fileId,
                 cursor,
                 selection
             });
@@ -305,14 +414,15 @@ module.exports = function setupCollaboration(io) {
 
         // ─── Comments ───
         socket.on('add-comment', (data) => {
-            const { sessionId, line, text } = data;
-            if (!sessionId || !text) return;
+            const { sessionId, fileId, line, text } = data;
+            if (!sessionId || !fileId || !text) return;
 
             const state = activeSessions.get(sessionId);
             if (!state) return;
 
             const comment = {
                 id: Math.random().toString(36).substring(2, 9),
+                fileId,
                 line,
                 text,
                 author: socket.username,
@@ -326,19 +436,22 @@ module.exports = function setupCollaboration(io) {
         });
 
         socket.on('language-change', (data) => {
-            const { sessionId, language } = data;
-            if (!sessionId) return;
+            const { sessionId, fileId, language } = data;
+            if (!sessionId || !fileId) return;
 
             const state = activeSessions.get(sessionId);
             if (state) {
-                state.language = language;
-                scheduleSave(sessionId);
+                const file = state.files.get(fileId);
+                if (file) {
+                    file.language = language;
+                    scheduleSave(sessionId);
+                    socket.to(sessionId).emit('language-changed', {
+                        fileId,
+                        language,
+                        userId: socket.id
+                    });
+                }
             }
-
-            socket.to(sessionId).emit('language-changed', {
-                language,
-                userId: socket.id
-            });
         });
 
         socket.on('disconnect', () => {

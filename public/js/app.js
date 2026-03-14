@@ -21,7 +21,10 @@
         users: new Map(),
         userRole: 'editor', // 'owner' | 'editor' | 'viewer'
         comments: [],
-        remoteCursors: new Map() // track remote selections
+        remoteCursors: new Map(), // track remote selections
+        files: new Map(), // Map of fileId -> { id, name, doc, language, version }
+        activeFileId: null,
+        openTabs: new Set() // Set of fileIds
     };
 
     // ─── API Helper ───
@@ -487,7 +490,7 @@
             class: "cm-comment-gutter",
             lineMarker(view, line) {
                 const lineNo = view.state.doc.lineAt(line.from).number;
-                const hasComment = state.comments.some(c => c.line === lineNo);
+                const hasComment = state.comments.some(c => c.line === lineNo && c.fileId === state.activeFileId);
                 if (hasComment) {
                     return new (class {
                         toDOM() {
@@ -621,13 +624,21 @@
         if (!localBatchTimer) {
             localBatchTimer = setTimeout(() => {
                 const opsToSend = pendingLocalOps.splice(0);
+                const file = state.files.get(state.activeFileId);
+                const currentVersion = file ? file.version : state.serverVersion;
+
                 opsToSend.forEach(op => {
                     state.socket.emit('code-change', {
                         sessionId: state.currentSession,
+                        fileId: state.activeFileId,
                         op,
-                        version: state.serverVersion
+                        version: currentVersion
                     });
                 });
+                
+                if (file && state.editorView) {
+                    file.doc = state.editorView.state.doc.toString();
+                }
                 localBatchTimer = null;
             }, LOCAL_BATCH_MS);
         }
@@ -648,7 +659,6 @@
 
         pendingRemoteOps.push(op);
 
-        // Batch multiple remote ops into a single editor transaction
         if (!remoteBatchTimer) {
             remoteBatchTimer = requestAnimationFrame(() => {
                 if (!state.editorView || pendingRemoteOps.length === 0) {
@@ -671,13 +681,20 @@
                         }
                     }
                     if (changes.length > 0) {
-                        // Apply all changes in one transaction
                         state.editorView.dispatch({ changes: changes[0] });
-                        // Apply remaining one by one (positions shift after each)
                         for (let i = 1; i < changes.length; i++) {
                             state.editorView.dispatch({ changes: changes[i] });
                         }
                     }
+                    
+                    // Update local string buffer
+                    if (state.activeFileId) {
+                        const file = state.files.get(state.activeFileId);
+                        if (file) {
+                            file.doc = state.editorView.state.doc.toString();
+                        }
+                    }
+                    
                 } finally {
                     state.isApplyingRemote = false;
                     pendingRemoteOps = [];
@@ -690,7 +707,7 @@
     // ─── Cursor Broadcasting ───
     let cursorTimer = null;
     function handleCursorUpdate(update) {
-        if (!state.socket || !state.currentSession) return;
+        if (!state.socket || !state.currentSession || !state.activeFileId) return;
         clearTimeout(cursorTimer);
         cursorTimer = setTimeout(() => {
             const main = update.state.selection.main;
@@ -699,6 +716,7 @@
             
             state.socket.emit('cursor-update', {
                 sessionId: state.currentSession,
+                fileId: state.activeFileId,
                 cursor: { line: line.number, ch: pos - line.from },
                 selection: { from: main.from, to: main.to, head: main.head }
             });
@@ -776,7 +794,13 @@
             // Update UI
             document.getElementById('editor-session-title').textContent = sessionData.title;
             document.getElementById('editor-session-id').textContent = `${sessionId}`;
-            document.getElementById('language-selector').value = sessionData.language || 'javascript';
+            
+            // Set language in dropdown if we have files
+            if (sessionData.files && sessionData.files.length > 0) {
+                document.getElementById('language-selector').value = sessionData.files[0].language || 'javascript';
+            } else {
+                document.getElementById('language-selector').value = sessionData.language || 'javascript';
+            }
             document.getElementById('statusbar-lang').textContent = document.getElementById('language-selector').options[document.getElementById('language-selector').selectedIndex].text;
 
             // Clear and create editor
@@ -815,8 +839,6 @@
         });
 
         state.socket.on('session-state', (data) => {
-            state.serverVersion = data.version;
-
             // Set user role
             state.userRole = data.role || 'editor';
             updateRoleBadge(state.userRole);
@@ -827,16 +849,39 @@
 
             const container = document.getElementById('editor-container');
             container.innerHTML = '';
-
-            state.editorView = createEditor(container, data.doc || '', data.language || 'javascript');
-
-            // If viewer, make editor read-only
-            if (state.userRole === 'viewer') {
-                setEditorReadOnly(true);
+            
+            // Load files
+            state.files.clear();
+            state.openTabs.clear();
+            
+            let firstFileId = null;
+            if (data.files && Object.keys(data.files).length > 0) {
+                for (const [id, fileData] of Object.entries(data.files)) {
+                    state.files.set(id, {
+                        id: fileData.id,
+                        name: fileData.name,
+                        doc: fileData.doc || '',
+                        language: fileData.language || 'javascript',
+                        version: fileData.version || 0
+                    });
+                    if (!firstFileId) firstFileId = id;
+                }
+            } else {
+                // Fallback for empty state
+                firstFileId = 'main_file';
+                state.files.set(firstFileId, {
+                    id: firstFileId,
+                    name: 'main.js',
+                    doc: '',
+                    language: 'javascript',
+                    version: 0
+                });
             }
 
-            // Update language selector
-            document.getElementById('language-selector').value = data.language || 'javascript';
+            // Setup initial file
+            if (firstFileId) {
+                openFile(firstFileId);
+            }
 
             // Update collaborators
             if (data.users) {
@@ -848,7 +893,51 @@
             }
 
             setSaveStatus('saved');
-            renderFileTree(); // Render static file tree
+            renderFileTree();
+            renderTabs();
+        });
+
+        state.socket.on('file-created', (fileData) => {
+            state.files.set(fileData.id, {
+                id: fileData.id,
+                name: fileData.name,
+                doc: fileData.doc,
+                language: fileData.language,
+                version: 0
+            });
+            renderFileTree();
+            openFile(fileData.id);
+        });
+
+        state.socket.on('file-deleted', (data) => {
+            state.files.delete(data.fileId);
+            state.openTabs.delete(data.fileId);
+            renderFileTree();
+            renderTabs();
+            
+            if (state.activeFileId === data.fileId) {
+                if (state.openTabs.size > 0) {
+                    openFile(Array.from(state.openTabs)[0]);
+                } else if (state.files.size > 0) {
+                    openFile(Array.from(state.files.keys())[0]);
+                } else {
+                    state.activeFileId = null;
+                    document.getElementById('editor-container').innerHTML = '';
+                    if (state.editorView) {
+                        state.editorView.destroy();
+                        state.editorView = null;
+                    }
+                }
+            }
+        });
+
+        state.socket.on('file-renamed', (data) => {
+            const file = state.files.get(data.fileId);
+            if (file) {
+                file.name = data.newName;
+                renderFileTree();
+                renderTabs();
+            }
         });
 
         state.socket.on('comment-added', (comment) => {
@@ -866,12 +955,30 @@
         });
 
         state.socket.on('remote-change', (data) => {
-            state.serverVersion = data.version;
-            applyRemoteChange(data.op);
+            const { fileId, op, version } = data;
+            const file = state.files.get(fileId);
+            if (file) {
+                file.version = version;
+                // If it's the active file, apply to editor
+                if (fileId === state.activeFileId) {
+                    applyRemoteChange(op);
+                } else {
+                    // Just update the doc in memory
+                    // (A full OT implementation would maintain history per file here too)
+                    // For simplicity right now, since it's not the active editor, 
+                    // we'd need a headless way to apply the OT operation to a string, or just refetch.
+                    // A proper implementation would use `CodeMirror.State.Text.replace` or similar.
+                    // For now, we'll mark it as needing refresh if opened.
+                    file.needsRefresh = true;
+                }
+            }
         });
 
         state.socket.on('ack', (data) => {
-            state.serverVersion = data.version;
+            const file = state.files.get(data.fileId);
+            if (file) {
+                file.version = data.version;
+            }
         });
 
         state.socket.on('user-joined', (data) => {
@@ -885,9 +992,11 @@
             if (user) {
                 if (data.cursor) user.cursor = data.cursor;
                 if (data.selection) user.selection = data.selection;
+                user.activeFileId = data.fileId;
             } else {
-                state.users.set(data.socketId, { username: data.username, cursor: data.cursor, selection: data.selection, color: '#6C5CE7' });
+                state.users.set(data.socketId, { username: data.username, cursor: data.cursor, selection: data.selection, color: '#6C5CE7', activeFileId: data.fileId });
             }
+            // Only update selections if the remote user is on the same file
             updateRemoteSelections();
         });
 
@@ -899,8 +1008,18 @@
         });
 
         state.socket.on('language-changed', (data) => {
-            document.getElementById('language-selector').value = data.language;
-            reconfigureLanguage(data.language);
+            const { fileId, language, userId } = data;
+            const file = state.files.get(fileId);
+            if (file) {
+                file.language = language;
+                if (fileId === state.activeFileId) {
+                    document.getElementById('language-selector').value = language;
+                    reconfigureLanguage(language);
+                } else {
+                    renderFileTree();
+                    renderTabs();
+                }
+            }
         });
 
         // Role change events
@@ -940,12 +1059,12 @@
 
     // ─── Remote Selections Render ───
     function updateRemoteSelections() {
-        if (!state.editorView || !cmModulesLoaded) return;
+        if (!state.editorView || !cmModulesLoaded || !state.activeFileId) return;
         const { Decoration } = cmModules;
 
         const decos = [];
         state.users.forEach((user, id) => {
-            if (!user.selection) return;
+            if (!user.selection || user.activeFileId !== state.activeFileId) return;
             const from = Math.min(user.selection.from, state.editorView.state.doc.length);
             const to = Math.min(user.selection.to, state.editorView.state.doc.length);
             const head = Math.min(user.selection.head, state.editorView.state.doc.length);
@@ -984,8 +1103,24 @@
 
         state.editorView.destroy();
         state.editorView = createEditor(container, doc, lang);
+        
+        // Let server know we changed the active file's language
+        if (state.socket && state.currentSession && state.activeFileId) {
+            state.socket.emit('language-change', {
+                sessionId: state.currentSession,
+                fileId: state.activeFileId,
+                language: lang
+            });
+            // Update local memory
+            const file = state.files.get(state.activeFileId);
+            if (file) {
+                file.language = lang;
+            }
+        }
+        
         updateRemoteSelections(); // Restore selections
         renderFileTree(); // Update file extension
+        renderTabs();
         
         const langSelect = document.getElementById('language-selector');
         if(langSelect) {
@@ -996,36 +1131,149 @@
     // ─── File Tree & Layout Setup ───
     function renderFileTree() {
         const fileTree = document.getElementById('file-tree');
-        const lang = document.getElementById('language-selector').value || 'javascript';
-        // Mock a single file for now
-        const extMap = { javascript: '.js', python: '.py', html: '.html', css: '.css', typescript: '.ts', java: '.java', cpp: '.cpp', csharp: '.cs', go: '.go', rust: '.rs', php: '.php', ruby: '.rb', sql: '.sql', markdown: '.md' };
-        const ext = extMap[lang] || '.txt';
-        
-        // Simple file icon coloring based on language
-        let iconColor = '#519aba'; // default ts/js blue
-        if (lang === 'html') iconColor = '#e34c26';
-        if (lang === 'css') iconColor = '#264de4';
-        if (lang === 'python') iconColor = '#3572A5';
-        if (lang === 'java') iconColor = '#b07219';
+        if (!fileTree) return;
 
-        fileTree.innerHTML = `
-            <div class="file-item active">
-                <svg class="file-icon" viewBox="0 0 16 16" fill="${iconColor}"><path d="M13.71 4.29l-3-3L10 1H4a1 1 0 00-1 1v12a1 1 0 001 1h8a1 1 0 001-1V5l-.29-.71zM10 2.41L12.59 5H10V2.41zM4 14V2h5v4h4v8H4z"/></svg>
-                main${ext}
-            </div>
-        `;
+        let html = '';
+        state.files.forEach((file, id) => {
+            const lang = file.language || 'javascript';
+            let iconColor = '#519aba'; // default ts/js blue
+            if (lang === 'html') iconColor = '#e34c26';
+            if (lang === 'css') iconColor = '#264de4';
+            if (lang === 'python') iconColor = '#3572A5';
+            if (lang === 'java') iconColor = '#b07219';
 
-        const tabs = document.getElementById('editor-tabs');
-        tabs.innerHTML = `
-            <div class="editor-tab active">
-                <svg class="file-icon" viewBox="0 0 16 16" fill="${iconColor}" style="margin-right: 6px; width: 14px; height: 14px;"><path d="M13.71 4.29l-3-3L10 1H4a1 1 0 00-1 1v12a1 1 0 001 1h8a1 1 0 001-1V5l-.29-.71zM10 2.41L12.59 5H10V2.41zM4 14V2h5v4h4v8H4z"/></svg>
-                main${ext}
-                <div class="tab-close">✕</div>
-            </div>
-        `;
+            const isActive = id === state.activeFileId ? 'active' : '';
+
+            html += `
+                <div class="file-item ${isActive}" data-file-id="${id}" onclick="openFile('${id}')">
+                    <svg class="file-icon" viewBox="0 0 16 16" fill="${iconColor}"><path d="M13.71 4.29l-3-3L10 1H4a1 1 0 00-1 1v12a1 1 0 001 1h8a1 1 0 001-1V5l-.29-.71zM10 2.41L12.59 5H10V2.41zM4 14V2h5v4h4v8H4z"/></svg>
+                    ${file.name}
+                    ${state.userRole !== 'viewer' && state.files.size > 1 ? `
+                    <div class="file-actions">
+                        <svg class="file-action-icon" viewBox="0 0 16 16" fill="currentColor" onclick="event.stopPropagation(); deleteFile('${id}')"><path fill-rule="evenodd" d="M6.5 1.75a.25.25 0 01.25-.25h2.5a.25.25 0 01.25.25V3h-3V1.75zm4.5 0V3h2.25a.75.75 0 010 1.5H2.75a.75.75 0 010-1.5H5V1.75C5 .784 5.784 0 6.75 0h2.5C10.216 0 11 .784 11 1.75zM4.496 6.675a.75.75 0 10-1.492.15l.66 6.6A1.75 1.75 0 005.405 15h5.19c.9 0 1.652-.681 1.741-1.576l.66-6.6a.75.75 0 00-1.492-.149l-.66 6.6a.25.25 0 01-.249.225h-5.19a.25.25 0 01-.249-.225l-.66-6.6z"/></svg>
+                    </div>` : ''}
+                </div>
+            `;
+        });
+
+        fileTree.innerHTML = html;
     }
 
-    // ─── Comments System ───
+    function renderTabs() {
+        const tabsContainer = document.getElementById('editor-tabs');
+        if (!tabsContainer) return;
+
+        let html = '';
+        state.openTabs.forEach(id => {
+            const file = state.files.get(id);
+            if (!file) {
+                state.openTabs.delete(id);
+                return;
+            }
+            
+            const lang = file.language || 'javascript';
+            let iconColor = '#519aba'; // default ts/js blue
+            if (lang === 'html') iconColor = '#e34c26';
+            if (lang === 'css') iconColor = '#264de4';
+            if (lang === 'python') iconColor = '#3572A5';
+            if (lang === 'java') iconColor = '#b07219';
+
+            const isActive = id === state.activeFileId ? 'active' : '';
+            html += `
+                <div class="editor-tab ${isActive}" data-file-id="${id}" onclick="openFile('${id}')">
+                    <svg class="file-icon" viewBox="0 0 16 16" fill="${iconColor}" style="margin-right: 6px; width: 14px; height: 14px;"><path d="M13.71 4.29l-3-3L10 1H4a1 1 0 00-1 1v12a1 1 0 001 1h8a1 1 0 001-1V5l-.29-.71zM10 2.41L12.59 5H10V2.41zM4 14V2h5v4h4v8H4z"/></svg>
+                    <span class="tab-title">${file.name}</span>
+                    <div class="tab-close" onclick="event.stopPropagation(); closeTab('${id}')">✕</div>
+                </div>
+            `;
+        });
+
+        tabsContainer.innerHTML = html;
+    }
+
+    window.openFile = function(fileId) {
+        if (!state.files.has(fileId)) return;
+        
+        state.activeFileId = fileId;
+        state.openTabs.add(fileId);
+        
+        const file = state.files.get(fileId);
+        
+        const container = document.getElementById('editor-container');
+        if (state.editorView) {
+            state.editorView.destroy();
+        }
+        
+        container.innerHTML = '';
+        state.editorView = createEditor(container, file.doc, file.language);
+        
+        // If viewer, make editor read-only
+        if (state.userRole === 'viewer') {
+            setEditorReadOnly(true);
+        }
+
+        // Update language selector
+        const langSelect = document.getElementById('language-selector');
+        if (langSelect) {
+            langSelect.value = file.language || 'javascript';
+            document.getElementById('statusbar-lang').textContent = langSelect.options[langSelect.selectedIndex].text;
+        }
+
+        renderFileTree();
+        renderTabs();
+        updateRemoteSelections();
+    };
+
+    window.closeTab = function(fileId) {
+        state.openTabs.delete(fileId);
+        
+        if (state.activeFileId === fileId) {
+            if (state.openTabs.size > 0) {
+                openFile(Array.from(state.openTabs)[0]);
+            } else {
+                state.activeFileId = null;
+                document.getElementById('editor-container').innerHTML = '';
+                if (state.editorView) {
+                    state.editorView.destroy();
+                    state.editorView = null;
+                }
+            }
+        }
+        
+        renderTabs();
+    };
+
+    window.deleteFile = function(fileId) {
+        if (state.userRole === 'viewer') return;
+        if (!confirm('Are you sure you want to delete this file?')) return;
+        
+        state.socket.emit('delete-file', {
+            sessionId: state.currentSession,
+            fileId: fileId
+        });
+    };
+
+        // ─── File Management UI Actions ───
+        document.getElementById('create-file-action').addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (state.userRole === 'viewer') return;
+            const name = prompt('Enter file name (e.g., style.css):');
+            if (!name) return;
+            let lang = 'javascript';
+            if (name.endsWith('.html')) lang = 'html';
+            else if (name.endsWith('.css')) lang = 'css';
+            else if (name.endsWith('.py')) lang = 'python';
+            else if (name.endsWith('.js')) lang = 'javascript';
+            else if (name.endsWith('.ts')) lang = 'typescript';
+            
+            if (state.socket && state.currentSession) {
+                state.socket.emit('create-file', {
+                    sessionId: state.currentSession,
+                    name: name,
+                    language: lang
+                });
+            }
+        });
     function openCommentDialog(line) {
         state.activeCommentLine = line;
         const sidebar = document.getElementById('comments-sidebar');
@@ -1036,7 +1284,7 @@
 
     function renderComments(line) {
         const list = document.getElementById('comments-list');
-        const comments = state.comments.filter(c => c.line === line);
+        const comments = state.comments.filter(c => c.line === line && c.fileId === state.activeFileId);
         
         if (comments.length === 0) {
             list.innerHTML = '<div style="color:#888; font-size:12px; padding:10px;">No comments on this line yet.</div>';
@@ -1161,12 +1409,6 @@
         document.getElementById('language-selector').addEventListener('change', (e) => {
             const lang = e.target.value;
             reconfigureLanguage(lang);
-            if (state.socket && state.currentSession) {
-                state.socket.emit('language-change', {
-                    sessionId: state.currentSession,
-                    language: lang
-                });
-            }
         });
 
         document.getElementById('copy-session-link').addEventListener('click', () => {
@@ -1238,9 +1480,10 @@
         document.getElementById('submit-comment-btn').addEventListener('click', () => {
             const input = document.getElementById('new-comment-input');
             const text = input.value.trim();
-            if (text && state.activeCommentLine !== null && state.socket) {
+            if (text && state.activeCommentLine !== null && state.socket && state.activeFileId) {
                 state.socket.emit('add-comment', {
                     sessionId: state.currentSession,
+                    fileId: state.activeFileId,
                     line: state.activeCommentLine,
                     text
                 });

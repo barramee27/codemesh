@@ -1054,12 +1054,59 @@ select.input-full {
   min-height: 0;
 }
 
-/* ═══════════════ EDITOR CONTAINER ═══════════════ */
+/* ═══════════════ EDITOR OVERRIDES ═══════════════ */
+.cm-editor {
+  background: var(--vscode-bg) !important;
+  color: var(--text-primary) !important;
+  height: 100%;
+}
+
+.cm-gutters {
+  background: var(--vscode-bg) !important;
+  border-right: none !important;
+}
+
+.cm-lineNumbers {
+  color: #858585 !important;
+}
+
+.cm-activeLineGutter {
+  background: transparent !important;
+  color: #c6c6c6 !important;
+}
+
+.cm-activeLine {
+  background-color: rgba(255, 255, 255, 0.04) !important;
+}
 .editor-container {
   flex: 1;
   min-height: 0;
   overflow: hidden;
   background: #1e1e1e;
+}
+
+.cm-editor {
+  background: var(--vscode-bg) !important;
+  color: var(--text-primary) !important;
+  height: 100%;
+}
+
+.cm-gutters {
+  background: var(--vscode-bg) !important;
+  border-right: none !important;
+}
+
+.cm-lineNumbers {
+  color: #858585 !important;
+}
+
+.cm-activeLineGutter {
+  background: transparent !important;
+  color: #c6c6c6 !important;
+}
+
+.cm-activeLine {
+  background-color: rgba(255, 255, 255, 0.04) !important;
 }
 
 /* ═══════════ EDITOR VIEW (VS Code Style) ═══════════ */
