@@ -326,6 +326,24 @@ a:hover {
 }
 
 /* Forms */
+.auth-divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 4px 0;
+}
+.auth-divider::before,
+.auth-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+.auth-divider span {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
 .auth-form {
   display: flex;
   flex-direction: column;
@@ -1032,7 +1050,8 @@ select.input-full {
   display: flex;
   flex-direction: column;
   height: calc(100vh - 52px);
-  overflow: hidden;
+  overflow: auto;
+  min-height: 0;
 }
 
 /* ═══════════════ EDITOR CONTAINER ═══════════════ */
@@ -1120,6 +1139,7 @@ select.input-full {
 .preview-panel {
     height: 320px;
     min-height: 160px;
+    flex-shrink: 0;
     background: #fff;
     border-top: 2px solid var(--border);
     display: flex;

@@ -1,6 +1,7 @@
 const express = require('express');
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
+const { v4: uuidv4 } = require('uuid');
 
 const router = express.Router();
 const JWT_SECRET = process.env.JWT_SECRET || 'fallback_secret';
@@ -81,6 +82,31 @@ router.post('/login', async (req, res) => {
     } catch (err) {
         console.error('Login error:', err);
         res.status(500).json({ error: 'Login failed' });
+    }
+});
+
+// POST /api/auth/guest — create guest session (no account needed)
+router.post('/guest', async (req, res) => {
+    try {
+        const guestId = 'guest-' + uuidv4().slice(0, 8);
+        const username = 'Guest_' + guestId.slice(-6);
+
+        const user = new User({
+            username,
+            email: `${guestId}@guest.codemesh.local`,
+            passwordHash: uuidv4(),
+            role: 'user'
+        });
+        await user.save();
+
+        const token = generateToken(user);
+        res.status(201).json({
+            token,
+            user: { ...user.toJSON(), guest: true }
+        });
+    } catch (err) {
+        console.error('Guest auth error:', err);
+        res.status(500).json({ error: 'Failed to start guest session' });
     }
 });
 

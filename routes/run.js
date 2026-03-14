@@ -164,6 +164,16 @@ router.post('/', authMiddleware, async (req, res) => {
             result = await runProcess(runCmd, runArgs, TIMEOUT_MS);
         }
 
+        // Python not installed (Railway, etc.) — return helpful message
+        if (language === 'python' && result.stderr && (result.stderr.includes('spawn python3 ENOENT') || result.stderr.includes('spawn python ENOENT'))) {
+            result = {
+                stdout: '',
+                stderr: 'Python is not installed on this server. To run Python code, add Python to your deployment (e.g. Railway: add a nixpacks.toml or use a Python buildpack). JavaScript and HTML preview work without extra setup.',
+                code: 1,
+                timedOut: false
+            };
+        }
+
         const execTime = Date.now() - startTime;
 
         res.json({

@@ -175,6 +175,29 @@
                 btn.classList.remove('loading');
             }
         });
+
+        document.getElementById('guest-btn').addEventListener('click', async () => {
+            const btn = document.getElementById('guest-btn');
+            btn.classList.add('loading');
+            btn.disabled = true;
+            try {
+                const data = await api('/auth/guest', {
+                    method: 'POST',
+                    body: JSON.stringify({})
+                });
+                state.token = data.token;
+                state.user = data.user;
+                localStorage.setItem('codemesh_token', data.token);
+                localStorage.setItem('codemesh_user', JSON.stringify(data.user));
+                showToast('Welcome, ' + data.user.username + '!', 'success');
+                loadDashboard();
+            } catch (err) {
+                showToast(err.message || 'Guest login failed', 'error');
+            } finally {
+                btn.classList.remove('loading');
+                btn.disabled = false;
+            }
+        });
     }
 
     // ─── Logout ───
@@ -188,10 +211,25 @@
         initParticles();
     }
 
+    // ─── URL session routing (e.g. /work opens session "work") ───
+    function getSessionIdFromPath() {
+        const path = window.location.pathname.replace(/^\/+|\/+$/g, '');
+        if (!path || path === 'api' || path === 'css' || path === 'js' || path === 'socket.io') return null;
+        if (/^[a-zA-Z0-9_-]{3,50}$/.test(path)) return path;
+        return null;
+    }
+
+    function openSessionFromUrlIfAny() {
+        const sessionId = getSessionIdFromPath();
+        if (sessionId && state.token) {
+            openEditor(sessionId);
+        }
+    }
+
     // ─── Dashboard ───
     async function loadDashboard() {
         showView('dashboard');
-        document.getElementById('nav-username').textContent = state.user.username;
+        document.getElementById('nav-username').textContent = state.user ? state.user.username : 'Guest';
 
         // Show admin button if user is admin
         const adminBtn = document.getElementById('admin-panel-btn');
@@ -207,6 +245,8 @@
         } catch (err) {
             showToast('Failed to load sessions', 'error');
         }
+
+        openSessionFromUrlIfAny();
     }
 
     function renderSessions(sessions) {
@@ -611,16 +651,36 @@
             // Load CodeMirror modules
             await loadCodeMirror();
 
-            // Load session data
+            // Load session data (create if doesn't exist, e.g. for /work)
             let sessionData;
             try {
                 sessionData = await api(`/sessions/${sessionId}`);
             } catch {
-                // Session doesn't exist, might be joining
-                sessionData = { sessionId, title: 'Shared Session', language: 'javascript', code: '' };
+                try {
+                    sessionData = await api('/sessions', {
+                        method: 'POST',
+                        body: JSON.stringify({
+                            title: sessionId === 'work' ? 'Work' : sessionId,
+                            language: 'javascript',
+                            customSessionId: sessionId
+                        })
+                    });
+                } catch (createErr) {
+                    try {
+                        sessionData = await api(`/sessions/${sessionId}`);
+                    } catch {
+                        sessionData = { sessionId, title: 'Shared Session', language: 'javascript', code: '' };
+                    }
+                }
             }
 
             state.currentSession = sessionId;
+
+            // Update URL to /sessionId for shareable links
+            const path = '/' + sessionId;
+            if (window.location.pathname !== path) {
+                history.replaceState({ sessionId }, '', path);
+            }
 
             // Update UI
             document.getElementById('editor-session-title').textContent = sessionData.title;
@@ -870,9 +930,9 @@
             if (state.editorView) { state.editorView.destroy(); state.editorView = null; }
             state.currentSession = null;
             state.users.clear();
-            // Hide output and preview panels when leaving editor
             document.getElementById('output-panel').style.display = 'none';
             document.getElementById('preview-panel').style.display = 'none';
+            history.replaceState({}, '', '/');
             loadDashboard();
         });
 
