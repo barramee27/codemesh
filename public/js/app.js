@@ -706,19 +706,25 @@
 
     // ─── Cursor Broadcasting ───
     let cursorTimer = null;
-    function handleCursorUpdate(update) {
+    function handleCursorUpdate(e) {
         if (!state.socket || !state.currentSession || !state.activeFileId) return;
         clearTimeout(cursorTimer);
         cursorTimer = setTimeout(() => {
-            const main = update.state.selection.main;
-            const pos = main.head;
-            const line = update.state.doc.lineAt(pos);
+            const selection = state.editorView.getSelection();
+            if (!selection) return;
+            
+            const model = state.editorView.getModel();
+            if (!model) return;
+
+            const headOffset = model.getOffsetAt(selection.getPosition());
+            const fromOffset = model.getOffsetAt(selection.getStartPosition());
+            const toOffset = model.getOffsetAt(selection.getEndPosition());
             
             state.socket.emit('cursor-update', {
                 sessionId: state.currentSession,
                 fileId: state.activeFileId,
-                cursor: { line: line.number, ch: pos - line.from },
-                selection: { from: main.from, to: main.to, head: main.head }
+                cursor: { line: selection.positionLineNumber, ch: selection.positionColumn },
+                selection: { from: fromOffset, to: toOffset, head: headOffset }
             });
         }, 50);
     }
@@ -738,7 +744,7 @@
             await api(`/sessions/${state.currentSession}`, {
                 method: 'PUT',
                 body: JSON.stringify({
-                    code: state.editorView.state.doc.toString()
+                    code: state.editorView.getValue()
                 })
             });
             setSaveStatus('saved');
@@ -757,8 +763,8 @@
         container.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-muted);">Loading editor...</div>';
 
         try {
-            // Load CodeMirror modules
-            await loadCodeMirror();
+            // Load Monaco modules
+            await loadMonaco();
 
             // Load session data (create if doesn't exist, e.g. for /work)
             let sessionData;
@@ -945,12 +951,7 @@
             if (state.activeCommentLine === comment.line) {
                 renderComments(comment.line);
             }
-            // re-render the gutter by forcing an update (hacky but works)
-            if (state.editorView) {
-                state.editorView.dispatch({
-                    changes: { from: 0, to: 0, insert: '' }
-                });
-            }
+            updateCommentGutter();
             showToast('New comment on line ' + comment.line, 'info');
         });
 
@@ -1059,50 +1060,57 @@
 
     // ─── Remote Selections Render ───
     function updateRemoteSelections() {
-        if (!state.editorView || !cmModulesLoaded || !state.activeFileId) return;
-        const { Decoration } = cmModules;
+        if (!state.editorView || !monacoLoaded || !state.activeFileId) return;
 
         const decos = [];
         state.users.forEach((user, id) => {
             if (!user.selection || user.activeFileId !== state.activeFileId) return;
-            const from = Math.min(user.selection.from, state.editorView.state.doc.length);
-            const to = Math.min(user.selection.to, state.editorView.state.doc.length);
-            const head = Math.min(user.selection.head, state.editorView.state.doc.length);
-
-            // Selection background
-            if (from !== to) {
-                decos.push(Decoration.mark({ class: "cm-remote-selection" }).range(Math.min(from, to), Math.max(from, to)));
-            }
             
-            // Cursor widget
-            if (CursorWidgetClass) {
-                decos.push(Decoration.widget({
-                    widget: new CursorWidgetClass(user.color || '#6C5CE7', user.username),
-                    side: 1
-                }).range(head));
+            const model = state.editorView.getModel();
+            if (!model) return;
+
+            const fromPos = model.getPositionAt(user.selection.from);
+            const toPos = model.getPositionAt(user.selection.to);
+            const headPos = model.getPositionAt(user.selection.head);
+
+            if (user.selection.from !== user.selection.to) {
+                decos.push({
+                    range: new monaco.Range(fromPos.lineNumber, fromPos.column, toPos.lineNumber, toPos.column),
+                    options: { className: 'monaco-remote-selection', hoverMessage: { value: user.username } }
+                });
+            }
+
+            // Cursor
+            decos.push({
+                range: new monaco.Range(headPos.lineNumber, headPos.column, headPos.lineNumber, headPos.column),
+                options: { 
+                    className: `monaco-remote-cursor monaco-remote-cursor-${id}`, 
+                    hoverMessage: { value: user.username }
+                }
+            });
+            
+            // Inject dynamic style for the user's cursor color if not exists
+            let styleEl = document.getElementById(`cursor-style-${id}`);
+            if (!styleEl) {
+                styleEl = document.createElement('style');
+                styleEl.id = `cursor-style-${id}`;
+                styleEl.innerHTML = `.monaco-remote-cursor-${id} { border-left: 2px solid ${user.color || '#6C5CE7'} !important; }`;
+                document.head.appendChild(styleEl);
             }
         });
 
-        // Sort decorations by position as required by CM6
-        decos.sort((a, b) => a.from - b.from);
-
-        if (remoteSelectionEffect) {
-            state.editorView.dispatch({
-                effects: remoteSelectionEffect.of(Decoration.set(decos))
-            });
+        if (!remoteDecorations) {
+            remoteDecorations = state.editorView.createDecorationsCollection(decos);
+        } else {
+            remoteDecorations.set(decos);
         }
     }
 
     // ─── Reconfigure Language ───
     function reconfigureLanguage(lang) {
-        if (!state.editorView || !cmModulesLoaded) return;
+        if (!state.editorView || !monacoLoaded) return;
 
-        const doc = state.editorView.state.doc.toString();
-        const container = document.getElementById('editor-container');
-        container.innerHTML = '';
-
-        state.editorView.destroy();
-        state.editorView = createEditor(container, doc, lang);
+        monaco.editor.setModelLanguage(state.editorView.getModel(), mapLanguageToMonaco(lang));
         
         // Let server know we changed the active file's language
         if (state.socket && state.currentSession && state.activeFileId) {
@@ -1373,11 +1381,7 @@
     function setEditorReadOnly(readonly) {
         if (!state.editorView) return;
 
-        // Toggle contenteditable on the CM content DOM
-        const cmContent = state.editorView.contentDOM;
-        if (cmContent) {
-            cmContent.contentEditable = readonly ? 'false' : 'true';
-        }
+        state.editorView.updateOptions({ readOnly: readonly });
 
         // Add/remove viewer overlay
         const container = document.getElementById('editor-container');
@@ -1503,7 +1507,7 @@
     async function runCode() {
         if (!state.editorView) return;
 
-        const code = state.editorView.state.doc.toString();
+        const code = state.editorView.getValue();
         const language = document.getElementById('language-selector').value;
 
         if (!code.trim()) {
