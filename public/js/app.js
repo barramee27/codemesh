@@ -355,240 +355,102 @@
         });
     }
 
-    // ─── CodeMirror Editor ───
-    let cmModulesLoaded = false;
-    let cmModules = {};
-    let remoteSelectionEffect;
-    let remoteSelectionField;
-    let CursorWidgetClass;
+    // ─── CodeMirror / Monaco Setup ───
+    let monacoLoaded = false;
+    let remoteDecorations = null;
+    let commentDecorations = null;
 
-    async function loadCodeMirror() {
-        if (cmModulesLoaded) return;
-
-        // Load CodeMirror ESM modules from CDN
-        const [
-            { EditorState, StateField, StateEffect },
-            { EditorView, keymap, lineNumbers, highlightActiveLineGutter, highlightSpecialChars,
-                drawSelection, dropCursor, rectangularSelection, crosshairCursor,
-                highlightActiveLine, Decoration, WidgetType, gutter },
-            { defaultHighlightStyle, syntaxHighlighting, indentOnInput, bracketMatching,
-                foldGutter, foldKeymap, LanguageDescription },
-            { defaultKeymap, history, historyKeymap, indentWithTab },
-            { closeBrackets, closeBracketsKeymap, autocompletion, completionKeymap },
-            { searchKeymap, highlightSelectionMatches },
-            { javascript },
-            { python },
-            { html },
-            { css },
-            { java },
-            { cpp },
-            { php },
-            { rust },
-            { sql },
-            { markdown },
-            { oneDark }
-        ] = await Promise.all([
-            import('https://esm.sh/@codemirror/state@6'),
-            import('https://esm.sh/@codemirror/view@6'),
-            import('https://esm.sh/@codemirror/language@6'),
-            import('https://esm.sh/@codemirror/commands@6'),
-            import('https://esm.sh/@codemirror/autocomplete@6'),
-            import('https://esm.sh/@codemirror/search@6'),
-            import('https://esm.sh/@codemirror/lang-javascript@6'),
-            import('https://esm.sh/@codemirror/lang-python@6'),
-            import('https://esm.sh/@codemirror/lang-html@6'),
-            import('https://esm.sh/@codemirror/lang-css@6'),
-            import('https://esm.sh/@codemirror/lang-java@6'),
-            import('https://esm.sh/@codemirror/lang-cpp@6'),
-            import('https://esm.sh/@codemirror/lang-php@6'),
-            import('https://esm.sh/@codemirror/lang-rust@6'),
-            import('https://esm.sh/@codemirror/lang-sql@6'),
-            import('https://esm.sh/@codemirror/lang-markdown@6'),
-            import('https://esm.sh/@codemirror/theme-one-dark@6')
-        ]);
-
-        cmModules = {
-            EditorState, StateField, StateEffect, EditorView, keymap, lineNumbers, highlightActiveLineGutter,
-            highlightSpecialChars, drawSelection, dropCursor, rectangularSelection, Decoration, WidgetType, gutter,
-            crosshairCursor, highlightActiveLine, defaultHighlightStyle,
-            syntaxHighlighting, indentOnInput, bracketMatching, foldGutter, foldKeymap,
-            defaultKeymap, history, historyKeymap, indentWithTab,
-            closeBrackets, closeBracketsKeymap, autocompletion, completionKeymap,
-            searchKeymap, highlightSelectionMatches, oneDark,
-            languages: { javascript, python, html, css, java, cpp, php, rust, sql, markdown }
-        };
-
-        cmModulesLoaded = true;
-    }
-
-    function getLanguageExtension(lang) {
-        const langMap = {
-            javascript: () => cmModules.languages.javascript({ jsx: true }),
-            typescript: () => cmModules.languages.javascript({ typescript: true, jsx: true }),
-            python: () => cmModules.languages.python(),
-            html: () => cmModules.languages.html(),
-            css: () => cmModules.languages.css(),
-            java: () => cmModules.languages.java(),
-            cpp: () => cmModules.languages.cpp(),
-            csharp: () => cmModules.languages.java(), // close enough syntax
-            php: () => cmModules.languages.php(),
-            rust: () => cmModules.languages.rust(),
-            sql: () => cmModules.languages.sql(),
-            markdown: () => cmModules.languages.markdown(),
-            go: () => cmModules.languages.javascript(), // fallback
-            ruby: () => cmModules.languages.python() // fallback
-        };
-        return (langMap[lang] || langMap.javascript)();
-    }
-
-    function getRemoteSelectionExtension() {
-        const { StateField, StateEffect, EditorView, Decoration, WidgetType } = cmModules;
-
-        if (!remoteSelectionEffect) {
-            remoteSelectionEffect = StateEffect.define();
-            
-            class CursorWidget extends WidgetType {
-                constructor(color, username) {
-                    super();
-                    this.color = color;
-                    this.username = username;
-                }
-                toDOM() {
-                    const wrap = document.createElement("span");
-                    wrap.className = "cm-remote-cursor";
-                    wrap.style.borderColor = this.color;
-                    const tooltip = document.createElement("span");
-                    tooltip.className = "cm-remote-cursor-tooltip";
-                    tooltip.style.backgroundColor = this.color;
-                    tooltip.textContent = this.username;
-                    wrap.appendChild(tooltip);
-                    return wrap;
-                }
+    async function loadMonaco() {
+        if (monacoLoaded) return;
+        return new Promise((resolve) => {
+            if (window.monaco) {
+                monacoLoaded = true;
+                resolve();
+                return;
             }
-            CursorWidgetClass = CursorWidget;
-
-            remoteSelectionField = StateField.define({
-                create() { return Decoration.none; },
-                update(decos, tr) {
-                    decos = decos.map(tr.changes);
-                    for (let e of tr.effects) {
-                        if (e.is(remoteSelectionEffect)) {
-                            return e.value;
-                        }
-                    }
-                    return decos;
-                },
-                provide: f => EditorView.decorations.from(f)
+            require.config({ paths: { 'vs': 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.44.0/min/vs' }});
+            require(['vs/editor/editor.main'], function() {
+                monacoLoaded = true;
+                resolve();
             });
-        }
-        return remoteSelectionField;
-    }
-
-    function getCommentGutter() {
-        const { gutter } = cmModules;
-        return gutter({
-            class: "cm-comment-gutter",
-            lineMarker(view, line) {
-                const lineNo = view.state.doc.lineAt(line.from).number;
-                const hasComment = state.comments.some(c => c.line === lineNo && c.fileId === state.activeFileId);
-                if (hasComment) {
-                    return new (class {
-                        toDOM() {
-                            const marker = document.createElement("div");
-                            marker.className = "cm-comment-marker";
-                            marker.title = "View comments";
-                            return marker;
-                        }
-                    })();
-                }
-                return null;
-            }
         });
     }
+
+    function mapLanguageToMonaco(lang) {
+        const langMap = {
+            javascript: 'javascript',
+            typescript: 'typescript',
+            python: 'python',
+            html: 'html',
+            css: 'css',
+            java: 'java',
+            cpp: 'cpp',
+            csharp: 'csharp',
+            php: 'php',
+            rust: 'rust',
+            sql: 'sql',
+            markdown: 'markdown',
+            go: 'go',
+            ruby: 'ruby'
+        };
+        return langMap[lang] || 'javascript';
+    }
+
+
+
+
 
     function createEditor(container, doc, language) {
-        const {
-            EditorState, EditorView, keymap, lineNumbers, highlightActiveLineGutter,
-            highlightSpecialChars, drawSelection, dropCursor, rectangularSelection,
-            crosshairCursor, highlightActiveLine, defaultHighlightStyle,
-            syntaxHighlighting, indentOnInput, bracketMatching, foldGutter, foldKeymap,
-            defaultKeymap, history, historyKeymap, indentWithTab,
-            closeBrackets, closeBracketsKeymap, autocompletion, completionKeymap,
-            searchKeymap, highlightSelectionMatches, oneDark, gutter
-        } = cmModules;
+        const editor = monaco.editor.create(container, {
+            value: doc,
+            language: mapLanguageToMonaco(language),
+            theme: 'vs-dark',
+            automaticLayout: true,
+            glyphMargin: true,
+            readOnly: state.userRole === 'viewer',
+            minimap: { enabled: false },
+            wordWrap: "on",
+            padding: { top: 10 }
+        });
 
-        const updateListener = EditorView.updateListener.of((update) => {
-            if (update.docChanged && !state.isApplyingRemote) {
-                handleLocalChange(update);
-            }
-            if (update.selectionSet) {
-                handleCursorUpdate(update);
+        editor.onDidChangeModelContent((e) => {
+            if (state.isApplyingRemote) return;
+            handleLocalChange(e);
+        });
+
+        editor.onDidChangeCursorSelection((e) => {
+            handleCursorUpdate(e);
+        });
+
+        editor.onMouseDown((e) => {
+            if (e.target.type === monaco.editor.MouseTargetType.GUTTER_GLYPH_MARGIN || e.target.type === monaco.editor.MouseTargetType.GUTTER_LINE_NUMBERS) {
+                openCommentDialog(e.target.position.lineNumber);
             }
         });
 
-        // Add click listener for line comments
-        const commentClickListener = EditorView.domEventHandlers({
-            mousedown(event, view) {
-                // Click on line number or our comment gutter
-                if (event.target.classList.contains('cm-lineNumbers') || 
-                    event.target.closest('.cm-lineNumbers') ||
-                    event.target.classList.contains('cm-comment-gutter') ||
-                    event.target.closest('.cm-comment-gutter')) {
-                    const pos = view.posAtDOM(event.target);
-                    const line = view.state.doc.lineAt(pos);
-                    openCommentDialog(line.number);
+        return editor;
+    }
+
+    function updateCommentGutter() {
+        if (!state.editorView || !state.activeFileId) return;
+        const decos = [];
+        const linesWithComments = new Set(state.comments.filter(c => c.fileId === state.activeFileId).map(c => c.line));
+        
+        linesWithComments.forEach(line => {
+            decos.push({
+                range: new monaco.Range(line, 1, line, 1),
+                options: {
+                    isWholeLine: true,
+                    glyphMarginClassName: 'monaco-comment-glyph'
                 }
-            }
+            });
         });
 
-        const editorState = EditorState.create({
-            doc,
-            extensions: [
-                getCommentGutter(),
-                lineNumbers(),
-                highlightActiveLineGutter(),
-                highlightSpecialChars(),
-                history(),
-                foldGutter(),
-                drawSelection(),
-                dropCursor(),
-                EditorState.allowMultipleSelections.of(true),
-                indentOnInput(),
-                syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
-                bracketMatching(),
-                closeBrackets(),
-                autocompletion(),
-                rectangularSelection(),
-                crosshairCursor(),
-                highlightActiveLine(),
-                highlightSelectionMatches(),
-                getRemoteSelectionExtension(),
-                commentClickListener,
-                keymap.of([
-                    ...closeBracketsKeymap,
-                    ...defaultKeymap,
-                    ...searchKeymap,
-                    ...historyKeymap,
-                    ...foldKeymap,
-                    ...completionKeymap,
-                    indentWithTab
-                ]),
-                getLanguageExtension(language),
-                oneDark,
-                updateListener,
-                EditorView.theme({
-                    '&': { height: '100%' },
-                    '.cm-scroller': { overflow: 'auto' }
-                })
-            ]
-        });
-
-        const view = new EditorView({
-            state: editorState,
-            parent: container
-        });
-
-        return view;
+        if (!commentDecorations) {
+            commentDecorations = state.editorView.createDecorationsCollection(decos);
+        } else {
+            commentDecorations.set(decos);
+        }
     }
 
     // ─── Local Changes → Server (batched for performance) ───
