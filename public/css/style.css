@@ -1116,6 +1116,25 @@ select.input-full {
   margin: 0;
 }
 
+/* ═══════════ PREVIEW PANEL (HTML) ═══════════ */
+.preview-panel {
+    height: 320px;
+    min-height: 160px;
+    background: #fff;
+    border-top: 2px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    animation: slideUp 0.25s var(--ease);
+}
+
+.preview-iframe {
+    flex: 1;
+    width: 100%;
+    min-height: 0;
+    border: none;
+    background: #fff;
+}
+
 .output-content .output-error {
   color: #f87171;
 }

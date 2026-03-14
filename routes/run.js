@@ -19,7 +19,8 @@ const RUNNERS = {
     },
     python: {
         ext: '.py',
-        cmd: (file) => ['python3', ['-u', file]]
+        cmd: (file) => ['python3', ['-u', file]],
+        cmdFallback: (file) => ['python', ['-u', file]]  // Fallback when python3 not found
     },
     typescript: {
         ext: '.ts',
@@ -153,10 +154,16 @@ router.post('/', authMiddleware, async (req, res) => {
             }
         }
 
-        // Run
-        const [runCmd, runArgs] = runner.cmd(filePath, outPath);
+        // Run (with fallback for Python when python3 not found)
+        let [runCmd, runArgs] = runner.cmd(filePath, outPath);
         const startTime = Date.now();
-        const result = await runProcess(runCmd, runArgs, TIMEOUT_MS);
+        let result = await runProcess(runCmd, runArgs, TIMEOUT_MS);
+
+        if (language === 'python' && runner.cmdFallback && result.stderr && result.stderr.includes('spawn python3 ENOENT')) {
+            [runCmd, runArgs] = runner.cmdFallback(filePath, outPath);
+            result = await runProcess(runCmd, runArgs, TIMEOUT_MS);
+        }
+
         const execTime = Date.now() - startTime;
 
         res.json({

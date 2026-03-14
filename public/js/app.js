@@ -870,8 +870,9 @@
             if (state.editorView) { state.editorView.destroy(); state.editorView = null; }
             state.currentSession = null;
             state.users.clear();
-            // Hide output panel when leaving editor
+            // Hide output and preview panels when leaving editor
             document.getElementById('output-panel').style.display = 'none';
+            document.getElementById('preview-panel').style.display = 'none';
             loadDashboard();
         });
 
@@ -924,6 +925,19 @@
             document.getElementById('output-panel').style.display = 'none';
         });
 
+        document.getElementById('close-preview-btn').addEventListener('click', () => {
+            document.getElementById('preview-panel').style.display = 'none';
+        });
+
+        document.getElementById('open-preview-new-tab').addEventListener('click', () => {
+            const iframe = document.getElementById('preview-iframe');
+            if (iframe && iframe.srcdoc) {
+                const w = window.open('', '_blank');
+                w.document.write(iframe.srcdoc);
+                w.document.close();
+            }
+        });
+
         // Ctrl+Enter to run code
         document.addEventListener('keydown', (e) => {
             if ((e.ctrlKey || e.metaKey) && e.key === 'Enter' && state.currentView === 'editor') {
@@ -945,19 +959,32 @@
             return;
         }
 
-        // Languages that support execution
-        const runnableLanguages = ['javascript', 'python', 'typescript', 'cpp', 'java', 'csharp', 'go', 'rust', 'php', 'ruby'];
-        if (!runnableLanguages.includes(language)) {
-            showToast(`${language} cannot be executed. Supported: JS, Python, TS, C++, Java, Go, Rust, PHP, Ruby`, 'error');
+        const runBtn = document.getElementById('run-code-btn');
+        const outputPanel = document.getElementById('output-panel');
+        const previewPanel = document.getElementById('preview-panel');
+
+        // HTML: show live preview in panel
+        if (language === 'html') {
+            previewPanel.style.display = '';
+            outputPanel.style.display = 'none';
+            const iframe = document.getElementById('preview-iframe');
+            iframe.srcdoc = code;
+            showToast('HTML preview updated', 'success');
             return;
         }
 
-        const runBtn = document.getElementById('run-code-btn');
-        const outputPanel = document.getElementById('output-panel');
+        // Languages that support execution
+        const runnableLanguages = ['javascript', 'python', 'typescript', 'cpp', 'java', 'csharp', 'go', 'rust', 'php', 'ruby'];
+        if (!runnableLanguages.includes(language)) {
+            showToast(`${language} cannot be executed. Supported: JS, Python, TS, C++, Java, Go, Rust, PHP, Ruby. Use HTML for preview.`, 'error');
+            return;
+        }
+
         const outputContent = document.getElementById('output-content');
         const execTimeEl = document.getElementById('exec-time');
 
-        // Show panel + loading
+        // Hide preview, show output panel
+        previewPanel.style.display = 'none';
         outputPanel.style.display = '';
         runBtn.classList.add('running');
         runBtn.querySelector('span').textContent = 'Running...';

@@ -2,6 +2,11 @@
   "name": "codemesh",
   "version": "1.0.0",
   "description": "Real-time collaborative code editing platform",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/barramee27/codemesh.git"
+  },
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
