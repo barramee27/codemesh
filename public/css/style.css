@@ -1100,6 +1100,35 @@ select.input-full {
   color: #858585 !important;
 }
 
+.cm-lineNumbers .cm-gutterElement {
+  position: relative;
+  cursor: pointer;
+}
+
+.cm-lineNumbers .cm-gutterElement:hover::after {
+  content: '+';
+  position: absolute;
+  left: 2px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: #fff;
+  background: #007acc;
+  border-radius: 3px;
+  width: 14px;
+  height: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  line-height: 1;
+  opacity: 0.8;
+  z-index: 10;
+}
+
+.cm-lineNumbers .cm-gutterElement:hover {
+  color: #c6c6c6 !important;
+}
+
 .cm-activeLineGutter {
   background: transparent !important;
   color: #c6c6c6 !important;
