@@ -88,11 +88,12 @@ router.get('/:id', async (req, res) => {
 // PUT /api/sessions/:id — update session
 router.put('/:id', authMiddleware, async (req, res) => {
     try {
-        const { code, title, language } = req.body;
+        const { code, title, language, files } = req.body;
         const update = {};
         if (code !== undefined) update.code = code;
         if (title !== undefined) update.title = title;
         if (language !== undefined) update.language = language;
+        if (files !== undefined && Array.isArray(files)) update.files = files;
         update.updatedAt = Date.now();
 
         const session = await Session.findOneAndUpdate(

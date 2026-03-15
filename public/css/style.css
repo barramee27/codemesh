@@ -1112,6 +1112,25 @@ select.input-full {
 .cm-activeLine {
   background-color: rgba(255, 255, 255, 0.04) !important;
 }
+.editor-split-container {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.editor-split-container.split-active .editor-container {
+  flex: 1;
+  min-width: 0;
+}
+
+.editor-split-container.split-active .editor-split-second {
+  flex: 1;
+  min-width: 0;
+  display: flex !important;
+  border-left: 1px solid var(--vscode-panel-border, #454545);
+}
+
 .editor-container {
   flex: 1;
   min-height: 0;
@@ -1224,10 +1243,46 @@ select.input-full {
   cursor: pointer;
   border-radius: 4px;
   margin: 0 2px;
+  position: relative;
 }
 
 .menubar-item:hover {
   background: rgba(255, 255, 255, 0.1);
+}
+
+.menubar-dropdown {
+  display: none;
+  position: absolute;
+  top: 100%;
+  left: 0;
+  min-width: 180px;
+  background: var(--vscode-dropdown-background, #252526);
+  border: 1px solid var(--vscode-dropdown-border, #454545);
+  border-radius: 4px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+  padding: 4px 0;
+  z-index: 10000;
+}
+
+.menubar-item:hover .menubar-dropdown {
+  display: block;
+}
+
+.menubar-dropdown-item {
+  padding: 6px 12px;
+  font-size: 13px;
+  cursor: pointer;
+  color: var(--vscode-foreground, #ccc);
+}
+
+.menubar-dropdown-item:hover {
+  background: var(--vscode-list-hoverBackground, #2a2d2e);
+}
+
+.menubar-dropdown-divider {
+  height: 1px;
+  background: var(--vscode-dropdown-border, #454545);
+  margin: 4px 0;
 }
 
 .vscode-titlebar-center {
@@ -1590,12 +1645,47 @@ select.input-full {
 }
 
 /* Panels */
-.vscode-panel {
+.vscode-panel,
+.vscode-panel-wrapper {
   height: 300px;
   border-top: 1px solid var(--vscode-panel-border);
   display: flex;
   flex-direction: column;
   background: var(--vscode-panel-bg);
+}
+
+.panel-content {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.problems-placeholder {
+  padding: 16px;
+  color: var(--vscode-descriptionForeground);
+  font-size: 13px;
+}
+
+.extensions-panel {
+  padding: 16px;
+}
+.extensions-placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  color: var(--vscode-foreground);
+  text-align: center;
+}
+
+.terminal-container {
+  height: 100%;
+  min-height: 200px;
+  padding: 8px;
+}
+.terminal-container .xterm {
+  height: 100%;
 }
 
 .vscode-panel-header {

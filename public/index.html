@@ -26,6 +26,9 @@
   
   <!-- VS Code Icons -->
   <link href="https://unpkg.com/@vscode/codicons/dist/codicon.css" rel="stylesheet" />
+  <!-- xterm.js for integrated terminal -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css" />
+  <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.js"></script>
   <!-- Styles -->
   <link rel="stylesheet" href="/css/style.css">
 </head>
@@ -310,14 +313,51 @@
           <i class="codicon codicon-vscode"></i>
         </div>
         <div class="vscode-menubar">
-          <div class="menubar-item">File</div>
-          <div class="menubar-item">Edit</div>
-          <div class="menubar-item">Selection</div>
-          <div class="menubar-item">View</div>
-          <div class="menubar-item">Go</div>
-          <div class="menubar-item">Run</div>
-          <div class="menubar-item">Terminal</div>
-          <div class="menubar-item">Help</div>
+          <div class="menubar-item" data-menu="file">File
+            <div class="menubar-dropdown">
+              <div class="menubar-dropdown-item" data-action="new-file">New File</div>
+              <div class="menubar-dropdown-item" data-action="save">Save</div>
+            </div>
+          </div>
+          <div class="menubar-item" data-menu="edit">Edit
+            <div class="menubar-dropdown">
+              <div class="menubar-dropdown-item" data-action="undo">Undo</div>
+              <div class="menubar-dropdown-item" data-action="redo">Redo</div>
+              <div class="menubar-dropdown-divider"></div>
+              <div class="menubar-dropdown-item" data-action="find">Find</div>
+            </div>
+          </div>
+          <div class="menubar-item" data-menu="selection">Selection
+            <div class="menubar-dropdown">
+              <div class="menubar-dropdown-item" data-action="select-all">Select All</div>
+            </div>
+          </div>
+          <div class="menubar-item" data-menu="view">View
+            <div class="menubar-dropdown">
+              <div class="menubar-dropdown-item" data-action="toggle-sidebar">Toggle Sidebar</div>
+              <div class="menubar-dropdown-item" data-action="toggle-panel">Toggle Panel</div>
+            </div>
+          </div>
+          <div class="menubar-item" data-menu="go">Go
+            <div class="menubar-dropdown">
+              <div class="menubar-dropdown-item" data-action="go-to-line">Go to Line...</div>
+            </div>
+          </div>
+          <div class="menubar-item" data-menu="run">Run
+            <div class="menubar-dropdown">
+              <div class="menubar-dropdown-item" data-action="run-code">Run Code</div>
+            </div>
+          </div>
+          <div class="menubar-item" data-menu="terminal">Terminal
+            <div class="menubar-dropdown">
+              <div class="menubar-dropdown-item" data-action="toggle-panel">Toggle Panel</div>
+            </div>
+          </div>
+          <div class="menubar-item" data-menu="help">Help
+            <div class="menubar-dropdown">
+              <div class="menubar-dropdown-item" data-action="about">About CodeMesh</div>
+            </div>
+          </div>
         </div>
       </div>
       <div class="vscode-titlebar-center">
@@ -345,19 +385,19 @@
       <!-- Activity Bar -->
       <div class="vscode-activity-bar">
         <div class="activity-actions-top">
-          <div class="activity-action active" title="Explorer">
+          <div class="activity-action active" data-activity="explorer" title="Explorer">
             <i class="codicon codicon-files"></i>
           </div>
-          <div class="activity-action" title="Search">
+          <div class="activity-action" data-activity="search" title="Search">
             <i class="codicon codicon-search"></i>
           </div>
-          <div class="activity-action" title="Source Control">
+          <div class="activity-action" data-activity="source-control" title="Source Control">
             <i class="codicon codicon-source-control"></i>
           </div>
-          <div class="activity-action" title="Run and Debug">
+          <div class="activity-action" data-activity="run" title="Run and Debug">
             <i class="codicon codicon-debug-alt"></i>
           </div>
-          <div class="activity-action" title="Extensions">
+          <div class="activity-action" data-activity="extensions" title="Extensions">
             <i class="codicon codicon-extensions"></i>
           </div>
         </div>
@@ -387,19 +427,26 @@
               <button class="btn btn-icon btn-xs" id="create-file-action" title="New File" style="background:none;border:none;cursor:pointer;opacity:0.8;color:inherit;padding:0;">
                 <i class="codicon codicon-new-file"></i>
               </button>
-              <button class="btn btn-icon btn-xs" title="New Folder" style="background:none;border:none;cursor:pointer;opacity:0.8;color:inherit;padding:0;">
+              <button class="btn btn-icon btn-xs" id="new-folder-action" title="New Folder" style="background:none;border:none;cursor:pointer;opacity:0.8;color:inherit;padding:0;">
                 <i class="codicon codicon-new-folder"></i>
               </button>
-              <button class="btn btn-icon btn-xs" title="Refresh Explorer" style="background:none;border:none;cursor:pointer;opacity:0.8;color:inherit;padding:0;">
+              <button class="btn btn-icon btn-xs" id="refresh-explorer-action" title="Refresh Explorer" style="background:none;border:none;cursor:pointer;opacity:0.8;color:inherit;padding:0;">
                 <i class="codicon codicon-refresh"></i>
               </button>
-              <button class="btn btn-icon btn-xs" title="Collapse Folders in Explorer" style="background:none;border:none;cursor:pointer;opacity:0.8;color:inherit;padding:0;">
+              <button class="btn btn-icon btn-xs" id="collapse-explorer-action" title="Collapse Folders in Explorer" style="background:none;border:none;cursor:pointer;opacity:0.8;color:inherit;padding:0;">
                 <i class="codicon codicon-collapse-all"></i>
               </button>
             </div>
           </div>
           <div class="file-tree" id="file-tree">
             <!-- Files populated here -->
+          </div>
+          <div id="extensions-panel" class="extensions-panel" style="display:none;">
+            <div class="extensions-placeholder">
+              <i class="codicon codicon-extensions" style="font-size: 48px; opacity: 0.3; margin-bottom: 12px;"></i>
+              <p>Extensions</p>
+              <p style="font-size: 12px; color: var(--vscode-descriptionForeground);">CodeMesh syncs in real time. Install extensions in your local VS Code.</p>
+            </div>
           </div>
         </div>
       </div>
@@ -414,7 +461,7 @@
             <button class="vscode-action-btn" id="run-code-btn" title="Run Code (Ctrl+Enter)">
               <i class="codicon codicon-play"></i>
             </button>
-            <button class="vscode-action-btn" title="Split Editor Right">
+            <button class="vscode-action-btn" id="split-editor-btn" title="Split Editor Right">
               <i class="codicon codicon-split-horizontal"></i>
             </button>
             <button class="vscode-action-btn" id="copy-session-link" title="Copy Invite Link">
@@ -426,8 +473,11 @@
           </div>
         </div>
 
-        <div class="editor-content-wrapper">
-          <div id="editor-container" class="editor-container"></div>
+        <div class="editor-content-wrapper" id="editor-wrapper">
+          <div id="editor-split-container" class="editor-split-container">
+            <div id="editor-container" class="editor-container"></div>
+            <div id="editor-container-2" class="editor-container editor-split-second" style="display:none;"></div>
+          </div>
           
           <!-- Line Comments Sidebar -->
           <div id="comments-sidebar" class="comments-sidebar" style="display:none;">
@@ -443,55 +493,43 @@
           </div>
         </div>
 
-        <!-- Integrated Panel (Output/Preview) -->
-        <div id="preview-panel" class="vscode-panel" style="display:none;">
+        <!-- Unified Panel (Output/Preview) -->
+        <div id="unified-panel" class="vscode-panel-wrapper" style="display:none;">
           <div class="vscode-panel-header">
-            <div class="vscode-panel-tabs">
-              <div class="vscode-panel-tab">PROBLEMS</div>
-              <div class="vscode-panel-tab">OUTPUT</div>
-              <div class="vscode-panel-tab">DEBUG CONSOLE</div>
-              <div class="vscode-panel-tab">TERMINAL</div>
-              <div class="vscode-panel-tab active">PORTS</div>
-              <div class="vscode-panel-tab active">PREVIEW</div>
-            </div>
-            <div class="vscode-panel-actions">
-              <button class="vscode-action-btn" id="open-preview-new-tab" title="Open in new tab">
-                <i class="codicon codicon-link-external"></i>
-              </button>
-              <button class="vscode-action-btn" title="Maximize Panel Size">
-                <i class="codicon codicon-chevron-up"></i>
-              </button>
-              <button class="vscode-action-btn" id="close-preview-btn" title="Close Panel">
-                <i class="codicon codicon-close"></i>
-              </button>
-            </div>
-          </div>
-          <iframe id="preview-iframe" class="preview-iframe" title="HTML Preview" sandbox="allow-scripts allow-same-origin"></iframe>
-        </div>
-        
-        <div id="output-panel" class="vscode-panel" style="display:none;">
-          <div class="vscode-panel-header">
-            <div class="vscode-panel-tabs">
-              <div class="vscode-panel-tab">PROBLEMS</div>
-              <div class="vscode-panel-tab active">OUTPUT</div>
-              <div class="vscode-panel-tab">DEBUG CONSOLE</div>
-              <div class="vscode-panel-tab">TERMINAL</div>
-              <div class="vscode-panel-tab">PORTS</div>
+            <div class="vscode-panel-tabs" id="panel-tabs">
+              <div class="vscode-panel-tab active" data-panel-tab="output">OUTPUT</div>
+              <div class="vscode-panel-tab" data-panel-tab="preview">PREVIEW</div>
+              <div class="vscode-panel-tab" data-panel-tab="problems">PROBLEMS</div>
+              <div class="vscode-panel-tab" data-panel-tab="terminal">TERMINAL</div>
             </div>
             <div class="vscode-panel-actions">
               <span class="output-exec-time" id="exec-time" style="font-size: 11px; margin-right: 8px;"></span>
+              <button class="vscode-action-btn" id="open-preview-new-tab" title="Open in new tab">
+                <i class="codicon codicon-link-external"></i>
+              </button>
               <button class="vscode-action-btn" id="clear-output-btn" title="Clear Output">
                 <i class="codicon codicon-clear-all"></i>
               </button>
               <button class="vscode-action-btn" title="Maximize Panel Size">
                 <i class="codicon codicon-chevron-up"></i>
               </button>
-              <button class="vscode-action-btn" id="close-output-btn" title="Close Panel">
+              <button class="vscode-action-btn" id="close-panel-btn" title="Close Panel">
                 <i class="codicon codicon-close"></i>
               </button>
             </div>
           </div>
-          <pre id="output-content" class="output-content"></pre>
+          <div id="output-panel-content" class="panel-content">
+            <pre id="output-content" class="output-content"></pre>
+          </div>
+          <div id="preview-panel-content" class="panel-content" style="display:none;">
+            <iframe id="preview-iframe" class="preview-iframe" title="HTML Preview" sandbox="allow-scripts allow-same-origin"></iframe>
+          </div>
+          <div id="problems-panel-content" class="panel-content" style="display:none;">
+            <div class="problems-placeholder">No problems detected.</div>
+          </div>
+          <div id="terminal-panel-content" class="panel-content" style="display:none;">
+            <div id="terminal-container" class="terminal-container"></div>
+          </div>
         </div>
       </div>
     </div>

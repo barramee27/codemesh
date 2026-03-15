@@ -24,7 +24,10 @@
         remoteCursors: new Map(), // track remote selections
         files: new Map(), // Map of fileId -> { id, name, doc, language, version }
         activeFileId: null,
-        openTabs: new Set() // Set of fileIds
+        openTabs: new Set(), // Set of fileIds
+        splitEditor: null,
+        splitActive: false,
+        terminal: null
     };
 
     // ─── API Helper ───
@@ -119,6 +122,8 @@
     function initAuth() {
         const loginForm = document.getElementById('login-form');
         const registerForm = document.getElementById('register-form');
+        const guestBtn = document.getElementById('guest-btn');
+        if (!loginForm || !registerForm || !guestBtn) return;
 
         loginForm.addEventListener('submit', async (e) => {
             e.preventDefault();
@@ -181,8 +186,8 @@
             }
         });
 
-        document.getElementById('guest-btn').addEventListener('click', async () => {
-            const btn = document.getElementById('guest-btn');
+        guestBtn.addEventListener('click', async () => {
+            const btn = guestBtn;
             btn.classList.add('loading');
             btn.disabled = true;
             try {
@@ -395,7 +400,8 @@
             sql: 'sql',
             markdown: 'markdown',
             go: 'go',
-            ruby: 'ruby'
+            ruby: 'ruby',
+            plaintext: 'plaintext'
         };
         return langMap[lang] || 'javascript';
     }
@@ -462,31 +468,22 @@
     let localBatchTimer = null;
     const LOCAL_BATCH_MS = 30; // Buffer rapid edits for 30ms
 
-    function handleLocalChange(update) {
+    function handleLocalChange(e) {
         if (!state.socket || !state.currentSession) return;
 
-        update.changes.iterChanges((fromA, toA, fromB, toB, inserted) => {
-            // Delete operation
-            if (toA > fromA) {
-                pendingLocalOps.push({
-                    type: 'delete',
-                    pos: fromA,
-                    count: toA - fromA
-                });
-            }
+        const model = state.editorView.getModel();
+        if (!model) return;
 
-            // Insert operation
-            const insertedText = inserted.toString();
-            if (insertedText.length > 0) {
-                pendingLocalOps.push({
-                    type: 'insert',
-                    pos: fromA,
-                    text: insertedText
-                });
+        for (const change of e.changes) {
+            const { rangeOffset, rangeLength, text } = change;
+            if (rangeLength > 0) {
+                pendingLocalOps.push({ type: 'delete', pos: rangeOffset, count: rangeLength });
             }
-        });
+            if (text && text.length > 0) {
+                pendingLocalOps.push({ type: 'insert', pos: rangeOffset, text });
+            }
+        }
 
-        // Batch ops and send after a short delay
         if (!localBatchTimer) {
             localBatchTimer = setTimeout(() => {
                 const opsToSend = pendingLocalOps.splice(0);
@@ -501,15 +498,14 @@
                         version: currentVersion
                     });
                 });
-                
+
                 if (file && state.editorView) {
-                    file.doc = state.editorView.state.doc.toString();
+                    file.doc = state.editorView.getValue();
                 }
                 localBatchTimer = null;
             }, LOCAL_BATCH_MS);
         }
 
-        // Update save status
         setSaveStatus('unsaved');
         clearTimeout(state.saveTimer);
         state.saveTimer = setTimeout(() => manualSave(), 5000);
@@ -534,33 +530,37 @@
 
                 state.isApplyingRemote = true;
                 try {
-                    const changes = [];
+                    const model = state.editorView.getModel();
+                    if (!model) return;
+
+                    const edits = [];
                     for (const remoteOp of pendingRemoteOps) {
-                        const doc = state.editorView.state.doc;
+                        const len = model.getValueLength();
+                        const pos = Math.min(remoteOp.pos, len);
                         if (remoteOp.type === 'insert') {
-                            const pos = Math.min(remoteOp.pos, doc.length);
-                            changes.push({ from: pos, insert: remoteOp.text });
+                            const start = model.getPositionAt(pos);
+                            edits.push({
+                                range: new monaco.Range(start.lineNumber, start.column, start.lineNumber, start.column),
+                                text: remoteOp.text
+                            });
                         } else if (remoteOp.type === 'delete') {
-                            const from = Math.min(remoteOp.pos, doc.length);
-                            const to = Math.min(remoteOp.pos + remoteOp.count, doc.length);
-                            changes.push({ from, to });
+                            const from = model.getPositionAt(pos);
+                            const toPos = Math.min(pos + remoteOp.count, len);
+                            const to = model.getPositionAt(toPos);
+                            edits.push({
+                                range: new monaco.Range(from.lineNumber, from.column, to.lineNumber, to.column),
+                                text: ''
+                            });
                         }
                     }
-                    if (changes.length > 0) {
-                        state.editorView.dispatch({ changes: changes[0] });
-                        for (let i = 1; i < changes.length; i++) {
-                            state.editorView.dispatch({ changes: changes[i] });
-                        }
+                    if (edits.length > 0) {
+                        state.editorView.executeEdits('remote', edits);
                     }
-                    
-                    // Update local string buffer
+
                     if (state.activeFileId) {
                         const file = state.files.get(state.activeFileId);
-                        if (file) {
-                            file.doc = state.editorView.state.doc.toString();
-                        }
+                        if (file) file.doc = state.editorView.getValue();
                     }
-                    
                 } finally {
                     state.isApplyingRemote = false;
                     pendingRemoteOps = [];
@@ -578,21 +578,28 @@
         cursorTimer = setTimeout(() => {
             const selection = state.editorView.getSelection();
             if (!selection) return;
-            
+
             const model = state.editorView.getModel();
             if (!model) return;
 
-            const headOffset = model.getOffsetAt(selection.getPosition());
-            const fromOffset = model.getOffsetAt(selection.getStartPosition());
-            const toOffset = model.getOffsetAt(selection.getEndPosition());
-            
+            const headOffset = model.getOffsetAt({ lineNumber: selection.positionLineNumber, column: selection.positionColumn });
+            const fromOffset = model.getOffsetAt({ lineNumber: selection.startLineNumber, column: selection.startColumn });
+            const toOffset = model.getOffsetAt({ lineNumber: selection.endLineNumber, column: selection.endColumn });
+
             state.socket.emit('cursor-update', {
                 sessionId: state.currentSession,
                 fileId: state.activeFileId,
                 cursor: { line: selection.positionLineNumber, ch: selection.positionColumn },
                 selection: { from: fromOffset, to: toOffset, head: headOffset }
             });
+
+            updateStatusbarCursor(selection);
         }, 50);
+    }
+
+    function updateStatusbarCursor(selection) {
+        const el = document.getElementById('statusbar-cursor');
+        if (el) el.textContent = `Ln ${selection.positionLineNumber}, Col ${selection.positionColumn}`;
     }
 
     // ─── Save ───
@@ -604,13 +611,23 @@
     }
 
     async function manualSave() {
-        if (!state.currentSession || !state.editorView) return;
+        if (!state.currentSession) return;
         setSaveStatus('saving');
         try {
+            const files = Array.from(state.files.entries()).map(([id, f]) => ({
+                id,
+                name: f.name,
+                content: f.doc,
+                language: f.language
+            }));
+            const primaryCode = state.activeFileId && state.files.has(state.activeFileId)
+                ? state.files.get(state.activeFileId).doc
+                : (state.editorView ? state.editorView.getValue() : '');
             await api(`/sessions/${state.currentSession}`, {
                 method: 'PUT',
                 body: JSON.stringify({
-                    code: state.editorView.getValue()
+                    code: primaryCode,
+                    files: files.length ? files : undefined
                 })
             });
             setSaveStatus('saved');
@@ -656,6 +673,7 @@
             }
 
             state.currentSession = sessionId;
+            if (state.terminal) { state.terminal.dispose(); state.terminal = null; }
 
             // Update URL to /sessionId for shareable links
             const path = '/' + sessionId;
@@ -673,12 +691,15 @@
             } else {
                 document.getElementById('language-selector').value = sessionData.language || 'javascript';
             }
-            document.getElementById('statusbar-lang').textContent = document.getElementById('language-selector').options[document.getElementById('language-selector').selectedIndex].text;
+            const statusbarLangEl = document.getElementById('statusbar-lang');
+            if (statusbarLangEl) {
+                statusbarLangEl.textContent = document.getElementById('language-selector').options[document.getElementById('language-selector').selectedIndex].text;
+            }
 
             // Clear and create editor
             container.innerHTML = '';
             if (state.editorView) {
-                state.editorView.destroy();
+                state.editorView.dispose();
             }
 
             // Connect WebSocket
@@ -796,7 +817,7 @@
                     state.activeFileId = null;
                     document.getElementById('editor-container').innerHTML = '';
                     if (state.editorView) {
-                        state.editorView.destroy();
+                        state.editorView.dispose();
                         state.editorView = null;
                     }
                 }
@@ -997,8 +1018,9 @@
         renderTabs();
         
         const langSelect = document.getElementById('language-selector');
-        if(langSelect) {
-            document.getElementById('statusbar-lang').textContent = langSelect.options[langSelect.selectedIndex].text;
+        const statusbarLangEl = document.getElementById('statusbar-lang');
+        if (langSelect && statusbarLangEl) {
+            statusbarLangEl.textContent = langSelect.options[langSelect.selectedIndex].text;
         }
     }
 
@@ -1017,6 +1039,7 @@
             else if (lang === 'python') { iconClass = 'codicon-symbol-misc'; iconColor = '#3572A5'; }
             else if (lang === 'java') { iconClass = 'codicon-symbol-class'; iconColor = '#b07219'; }
             else if (lang === 'javascript' || lang === 'typescript') { iconClass = 'codicon-symbol-class'; iconColor = '#f1e05a'; }
+            else if (lang === 'plaintext' || file.name.includes('/')) { iconClass = 'codicon-file'; iconColor = '#6e7681'; }
 
             const isActive = id === state.activeFileId ? 'active' : '';
 
@@ -1094,12 +1117,19 @@
         const file = state.files.get(fileId);
         
         const container = document.getElementById('editor-container');
-        if (state.editorView) {
-            state.editorView.destroy();
-        }
+        const container2 = document.getElementById('editor-container-2');
+        const splitContainer = document.getElementById('editor-split-container');
+        if (state.splitEditor) { state.splitEditor.dispose(); state.splitEditor = null; }
+        if (state.editorView) state.editorView.dispose();
         
         container.innerHTML = '';
+        if (container2) { container2.innerHTML = ''; container2.style.display = state.splitActive ? '' : 'none'; }
+        if (splitContainer) splitContainer.classList.toggle('split-active', state.splitActive);
         state.editorView = createEditor(container, file.doc, file.language);
+        if (state.splitActive && container2) {
+            const model = state.editorView.getModel();
+            if (model) state.splitEditor = monaco.editor.create(container2, { model, readOnly: state.userRole === 'viewer' });
+        }
         
         // If viewer, make editor read-only
         if (state.userRole === 'viewer') {
@@ -1108,9 +1138,10 @@
 
         // Update language selector
         const langSelect = document.getElementById('language-selector');
+        const statusbarLangEl = document.getElementById('statusbar-lang');
         if (langSelect) {
             langSelect.value = file.language || 'javascript';
-            document.getElementById('statusbar-lang').textContent = langSelect.options[langSelect.selectedIndex].text;
+            if (statusbarLangEl) statusbarLangEl.textContent = langSelect.options[langSelect.selectedIndex].text;
         }
 
         renderFileTree();
@@ -1127,10 +1158,12 @@
             } else {
                 state.activeFileId = null;
                 document.getElementById('editor-container').innerHTML = '';
-                if (state.editorView) {
-                    state.editorView.destroy();
-                    state.editorView = null;
-                }
+                const c2 = document.getElementById('editor-container-2');
+                if (c2) { c2.innerHTML = ''; c2.style.display = 'none'; }
+                document.getElementById('editor-split-container')?.classList.remove('split-active');
+                if (state.splitEditor) { state.splitEditor.dispose(); state.splitEditor = null; }
+                if (state.editorView) { state.editorView.dispose(); state.editorView = null; }
+                state.splitActive = false;
             }
         }
         
@@ -1147,27 +1180,6 @@
         });
     };
 
-        // ─── File Management UI Actions ───
-        document.getElementById('create-file-action').addEventListener('click', (e) => {
-            e.stopPropagation();
-            if (state.userRole === 'viewer') return;
-            const name = prompt('Enter file name (e.g., style.css):');
-            if (!name) return;
-            let lang = 'javascript';
-            if (name.endsWith('.html')) lang = 'html';
-            else if (name.endsWith('.css')) lang = 'css';
-            else if (name.endsWith('.py')) lang = 'python';
-            else if (name.endsWith('.js')) lang = 'javascript';
-            else if (name.endsWith('.ts')) lang = 'typescript';
-            
-            if (state.socket && state.currentSession) {
-                state.socket.emit('create-file', {
-                    sessionId: state.currentSession,
-                    name: name,
-                    language: lang
-                });
-            }
-        });
     function openCommentDialog(line) {
         state.activeCommentLine = line;
         const sidebar = document.getElementById('comments-sidebar');
@@ -1263,6 +1275,17 @@
         badge.textContent = labels[role] || role;
     }
 
+    function toggleSidebar() {
+        const sidebar = document.querySelector('.vscode-sidebar');
+        if (sidebar) sidebar.style.display = sidebar.style.display === 'none' ? '' : 'none';
+    }
+
+    function togglePanel() {
+        const up = document.getElementById('unified-panel');
+        if (!up) return;
+        up.style.display = up.style.display === 'none' ? '' : 'none';
+    }
+
     // ─── Set Editor Read-Only ───
     function setEditorReadOnly(readonly) {
         if (!state.editorView) return;
@@ -1283,25 +1306,75 @@
         }
     }
 
+    // ─── Integrated Terminal ───
+    function initTerminal() {
+        const container = document.getElementById('terminal-container');
+        if (!container || state.terminal) return;
+        if (typeof Terminal === 'undefined') {
+            container.innerHTML = '<div class="problems-placeholder">Terminal requires xterm.js. Refresh the page.</div>';
+            return;
+        }
+        container.innerHTML = '';
+        const term = new Terminal({ cursorBlink: true, theme: { background: '#1e1e1e', foreground: '#d4d4d4' } });
+        term.open(container);
+        term.writeln('CodeMesh Terminal (type a command and press Enter)');
+        term.writeln('Allowed: node, python3, python, npm, npx, ls, pwd, echo, cat, clear, whoami, date');
+        term.write('\r\n$ ');
+        let currentLine = '';
+        term.onData((data) => {
+            if (data === '\r' || data === '\n') {
+                const cmd = currentLine.trim();
+                currentLine = '';
+                if (cmd === 'clear') {
+                    term.clear();
+                    term.write('$ ');
+                    return;
+                }
+                if (!cmd) { term.write('\r\n$ '); return; }
+                term.writeln('');
+                api('/terminal/exec', { method: 'POST', body: JSON.stringify({ command: cmd }) })
+                    .then(r => {
+                        if (r.output) term.writeln(r.output);
+                        if (r.error) term.writeln('\x1b[31m' + r.error + '\x1b[0m');
+                    })
+                    .catch(err => term.writeln('\x1b[31mError: ' + err.message + '\x1b[0m'))
+                    .finally(() => term.write('\r\n$ '));
+            } else if (data === '\u007F') {
+                if (currentLine.length) {
+                    currentLine = currentLine.slice(0, -1);
+                    term.write('\b \b');
+                }
+            } else {
+                currentLine += data;
+                term.write(data);
+            }
+        });
+        state.terminal = term;
+    }
+
     // ─── Editor Toolbar Events ───
     function initEditorToolbar() {
-        document.getElementById('back-to-dashboard').addEventListener('click', () => {
+        const backBtn = document.getElementById('back-to-dashboard');
+        backBtn?.addEventListener('click', () => {
             if (state.socket) { state.socket.disconnect(); state.socket = null; }
-            if (state.editorView) { state.editorView.destroy(); state.editorView = null; }
+            if (state.splitEditor) { state.splitEditor.dispose(); state.splitEditor = null; }
+            if (state.editorView) { state.editorView.dispose(); state.editorView = null; }
+            if (state.terminal) { state.terminal.dispose(); state.terminal = null; }
+            state.splitActive = false;
             state.currentSession = null;
             state.users.clear();
-            document.getElementById('output-panel').style.display = 'none';
-            document.getElementById('preview-panel').style.display = 'none';
+            const up = document.getElementById('unified-panel');
+            if (up) up.style.display = 'none';
             history.replaceState({}, '', '/');
             loadDashboard();
         });
 
-        document.getElementById('language-selector').addEventListener('change', (e) => {
+        document.getElementById('language-selector')?.addEventListener('change', (e) => {
             const lang = e.target.value;
             reconfigureLanguage(lang);
         });
 
-        document.getElementById('copy-session-link').addEventListener('click', () => {
+        document.getElementById('copy-session-link')?.addEventListener('click', () => {
             const id = state.currentSession;
             if (id) {
                 const url = window.location.origin + '/' + id;
@@ -1320,31 +1393,28 @@
             }
         });
 
-        document.getElementById('editor-session-id').addEventListener('click', () => {
+        document.getElementById('editor-session-id')?.addEventListener('click', () => {
             document.getElementById('copy-session-link').click();
         });
 
-        document.getElementById('statusbar-save').addEventListener('click', () => {
+        document.getElementById('statusbar-save')?.addEventListener('click', () => {
             manualSave();
         });
 
         // ─── Run Code ───
-        document.getElementById('run-code-btn').addEventListener('click', runCode);
+        document.getElementById('run-code-btn')?.addEventListener('click', runCode);
 
-        document.getElementById('clear-output-btn').addEventListener('click', () => {
+        document.getElementById('clear-output-btn')?.addEventListener('click', () => {
             document.getElementById('output-content').innerHTML = '';
             document.getElementById('exec-time').textContent = '';
         });
 
-        document.getElementById('close-output-btn').addEventListener('click', () => {
-            document.getElementById('output-panel').style.display = 'none';
+        document.getElementById('close-panel-btn')?.addEventListener('click', () => {
+            const up = document.getElementById('unified-panel');
+            if (up) up.style.display = 'none';
         });
 
-        document.getElementById('close-preview-btn').addEventListener('click', () => {
-            document.getElementById('preview-panel').style.display = 'none';
-        });
-
-        document.getElementById('open-preview-new-tab').addEventListener('click', () => {
+        document.getElementById('open-preview-new-tab')?.addEventListener('click', () => {
             const iframe = document.getElementById('preview-iframe');
             if (iframe && iframe.srcdoc) {
                 const w = window.open('', '_blank');
@@ -1353,12 +1423,153 @@
             }
         });
 
-        // Ctrl+Enter to run code
+        // Ctrl+Enter to run code, Ctrl+S to save
         document.addEventListener('keydown', (e) => {
-            if ((e.ctrlKey || e.metaKey) && e.key === 'Enter' && state.currentView === 'editor') {
+            if (state.currentView !== 'editor') return;
+            if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
                 e.preventDefault();
                 runCode();
+            } else if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+                e.preventDefault();
+                manualSave();
             }
+        });
+
+        // ─── Menubar (dropdown actions) ───
+        document.querySelectorAll('.menubar-dropdown-item[data-action]').forEach(item => {
+            item.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const action = item.dataset.action;
+                if (action === 'new-file') document.getElementById('create-file-action')?.click();
+                else if (action === 'save') manualSave();
+                else if (action === 'undo' && state.editorView) state.editorView.trigger('keyboard', 'undo', null);
+                else if (action === 'redo' && state.editorView) state.editorView.trigger('keyboard', 'redo', null);
+                else if (action === 'find' && state.editorView) { state.editorView.focus(); state.editorView.trigger('toggleFind', 'actions.find'); }
+                else if (action === 'select-all' && state.editorView) state.editorView.trigger('keyboard', 'editor.action.selectAll', null);
+                else if (action === 'toggle-sidebar') toggleSidebar();
+                else if (action === 'toggle-panel') togglePanel();
+                else if (action === 'go-to-line' && state.editorView) state.editorView.trigger('', 'editor.action.gotoLine', null);
+                else if (action === 'run-code') runCode();
+                else if (action === 'about') showToast('CodeMesh — Real-time Collaborative Code Editor', 'info');
+            });
+        });
+
+        // ─── Activity Bar ───
+        document.querySelectorAll('.activity-action[data-activity]').forEach(el => {
+            el.addEventListener('click', () => {
+                document.querySelectorAll('.activity-action').forEach(a => a.classList.remove('active'));
+                el.classList.add('active');
+                const act = el.dataset.activity;
+                const sidebar = document.querySelector('.vscode-sidebar');
+                if (act === 'explorer') {
+                    if (sidebar) sidebar.style.display = '';
+                    const tree = document.getElementById('file-tree');
+                    const extPanel = document.getElementById('extensions-panel');
+                    if (tree) tree.style.display = '';
+                    if (extPanel) extPanel.style.display = 'none';
+                }
+                else if (act === 'search') { state.editorView?.focus(); state.editorView?.trigger('toggleFind', 'actions.find'); }
+                else if (act === 'source-control') {
+                    if (sidebar) sidebar.style.display = '';
+                    const tree = document.getElementById('file-tree');
+                    const extPanel = document.getElementById('extensions-panel');
+                    if (tree) tree.style.display = '';
+                    if (extPanel) extPanel.style.display = 'none';
+                    showToast('Source control: CodeMesh syncs automatically.', 'info');
+                }
+                else if (act === 'run') runCode();
+                else if (act === 'extensions') {
+                    if (sidebar) sidebar.style.display = '';
+                    const tree = document.getElementById('file-tree');
+                    const extPanel = document.getElementById('extensions-panel');
+                    if (tree) tree.style.display = 'none';
+                    if (extPanel) extPanel.style.display = 'block';
+                }
+            });
+        });
+
+        // ─── Sidebar Actions (4 buttons: New File, New Folder, Refresh, Collapse) ───
+        document.getElementById('create-file-action')?.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (state.userRole === 'viewer') return;
+            if (!state.socket || !state.currentSession) {
+                showToast('Open a session first.', 'info');
+                return;
+            }
+            const name = prompt('Enter file name (e.g., style.css):');
+            if (!name) return;
+            let lang = 'javascript';
+            if (name.endsWith('.html')) lang = 'html';
+            else if (name.endsWith('.css')) lang = 'css';
+            else if (name.endsWith('.py')) lang = 'python';
+            else if (name.endsWith('.js')) lang = 'javascript';
+            else if (name.endsWith('.ts')) lang = 'typescript';
+            state.socket.emit('create-file', { sessionId: state.currentSession, name, language: lang });
+        });
+        document.getElementById('new-folder-action')?.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (state.userRole === 'viewer') return;
+            if (!state.socket || !state.currentSession) {
+                showToast('Open a session first.', 'info');
+                return;
+            }
+            const name = prompt('Enter folder name (e.g., src):');
+            if (!name) return;
+            state.socket.emit('create-file', { sessionId: state.currentSession, name: name + '/.gitkeep', language: 'plaintext' });
+            showToast('Folder created. Add files via New File.', 'success');
+        });
+        document.getElementById('refresh-explorer-action')?.addEventListener('click', () => {
+            if (state.socket && state.currentSession) {
+                state.socket.emit('request-state', { sessionId: state.currentSession });
+                showToast('Refreshing...', 'info');
+            } else {
+                showToast('Open a session first.', 'info');
+            }
+        });
+        document.getElementById('collapse-explorer-action')?.addEventListener('click', () => {
+            const tree = document.getElementById('file-tree');
+            const section = document.querySelector('.sidebar-section');
+            if (tree && section) {
+                const isCollapsed = tree.style.display === 'none';
+                tree.style.display = isCollapsed ? '' : 'none';
+                const chevron = section.querySelector('.sidebar-section-header .codicon');
+                if (chevron) chevron.className = isCollapsed ? 'codicon codicon-chevron-down' : 'codicon codicon-chevron-right';
+            }
+        });
+
+        // ─── Split Editor ───
+        document.getElementById('split-editor-btn')?.addEventListener('click', () => {
+            if (!state.editorView) return;
+            const container2 = document.getElementById('editor-container-2');
+            const splitContainer = document.getElementById('editor-split-container');
+            if (state.splitActive && state.splitEditor) {
+                state.splitEditor.dispose();
+                state.splitEditor = null;
+                state.splitActive = false;
+                if (container2) container2.style.display = 'none';
+                if (splitContainer) splitContainer.classList.remove('split-active');
+            } else {
+                const model = state.editorView.getModel();
+                if (!model) return;
+                if (container2) container2.style.display = '';
+                if (splitContainer) splitContainer.classList.add('split-active');
+                state.splitEditor = monaco.editor.create(container2, { model, readOnly: state.userRole === 'viewer' });
+                state.splitActive = true;
+            }
+        });
+
+        // ─── Panel Tab Switching ───
+        document.querySelectorAll('#panel-tabs .vscode-panel-tab').forEach(tab => {
+            tab.addEventListener('click', () => {
+                const tabId = tab.dataset.panelTab;
+                document.querySelectorAll('#panel-tabs .vscode-panel-tab').forEach(t => t.classList.remove('active'));
+                tab.classList.add('active');
+                ['output', 'preview', 'problems', 'terminal'].forEach(id => {
+                    const el = document.getElementById(id + '-panel-content');
+                    if (el) el.style.display = id === tabId ? '' : 'none';
+                });
+                if (tabId === 'terminal') initTerminal();
+            });
         });
 
         // ─── Comment Events ───
@@ -1402,15 +1613,20 @@
         }
 
         const runBtn = document.getElementById('run-code-btn');
-        const outputPanel = document.getElementById('output-panel');
-        const previewPanel = document.getElementById('preview-panel');
+        const unifiedPanel = document.getElementById('unified-panel');
+        const outputPanelContent = document.getElementById('output-panel-content');
+        const previewContent = document.getElementById('preview-panel-content');
 
         // HTML: show live preview in panel
         if (language === 'html') {
-            previewPanel.style.display = '';
-            outputPanel.style.display = 'none';
+            if (unifiedPanel) unifiedPanel.style.display = '';
+            if (outputPanelContent) outputPanelContent.style.display = 'none';
+            if (previewContent) previewContent.style.display = '';
+            document.querySelectorAll('#panel-tabs .vscode-panel-tab').forEach(t => t.classList.remove('active'));
+            const previewTab = document.querySelector('#panel-tabs .vscode-panel-tab[data-panel-tab="preview"]');
+            if (previewTab) previewTab.classList.add('active');
             const iframe = document.getElementById('preview-iframe');
-            iframe.srcdoc = code;
+            if (iframe) iframe.srcdoc = code;
             showToast('HTML preview updated', 'success');
             return;
         }
@@ -1425,12 +1641,17 @@
         const outputContent = document.getElementById('output-content');
         const execTimeEl = document.getElementById('exec-time');
 
-        // Hide preview, show output panel
-        previewPanel.style.display = 'none';
-        outputPanel.style.display = '';
+        // Show unified panel with output tab
+        if (unifiedPanel) unifiedPanel.style.display = '';
+        if (outputPanelContent) outputPanelContent.style.display = '';
+        if (previewContent) previewContent.style.display = 'none';
+        document.querySelectorAll('#panel-tabs .vscode-panel-tab').forEach(t => t.classList.remove('active'));
+        const outputTab = document.querySelector('#panel-tabs .vscode-panel-tab[data-panel-tab="output"]');
+        if (outputTab) outputTab.classList.add('active');
         runBtn.classList.add('running');
-        runBtn.querySelector('span').textContent = 'Running...';
-        outputContent.innerHTML = '<span class="output-info">⏳ Executing code...</span>';
+        const runBtnSpan = runBtn.querySelector('span');
+        if (runBtnSpan) runBtnSpan.textContent = 'Running...';
+        if (outputContent) outputContent.innerHTML = '<span class="output-info">⏳ Executing code...</span>';
         execTimeEl.textContent = '';
 
         try {
@@ -1470,7 +1691,8 @@
             execTimeEl.textContent = '';
         } finally {
             runBtn.classList.remove('running');
-            runBtn.querySelector('span').textContent = 'Run';
+            const runBtnSpan = runBtn.querySelector('span');
+            if (runBtnSpan) runBtnSpan.textContent = 'Run';
         }
     }
 

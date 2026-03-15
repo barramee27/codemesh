@@ -11,6 +11,7 @@ const rateLimit = require('express-rate-limit');
 const authRoutes = require('./routes/auth');
 const sessionRoutes = require('./routes/sessions');
 const runRoutes = require('./routes/run');
+const terminalRoutes = require('./routes/terminal');
 const adminRoutes = require('./routes/admin');
 const setupCollaboration = require('./sockets/collaboration');
 
@@ -54,6 +55,7 @@ app.use('/api', apiLimiter);
 app.use('/api/auth', authRoutes);
 app.use('/api/sessions', sessionRoutes);
 app.use('/api/run', runRoutes);
+app.use('/api/terminal', terminalRoutes);
 app.use('/api/admin', adminRoutes);
 
 // SPA fallback
