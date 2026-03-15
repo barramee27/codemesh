@@ -1010,27 +1010,43 @@
         let html = '';
         state.files.forEach((file, id) => {
             const lang = file.language || 'javascript';
-            let iconColor = '#519aba'; // default ts/js blue
-            if (lang === 'html') iconColor = '#e34c26';
-            if (lang === 'css') iconColor = '#264de4';
-            if (lang === 'python') iconColor = '#3572A5';
-            if (lang === 'java') iconColor = '#b07219';
+            let iconClass = 'codicon-file';
+            let iconColor = '#519aba';
+            if (lang === 'html') { iconClass = 'codicon-code'; iconColor = '#e34c26'; }
+            else if (lang === 'css') { iconClass = 'codicon-symbol-color'; iconColor = '#563d7c'; }
+            else if (lang === 'python') { iconClass = 'codicon-symbol-misc'; iconColor = '#3572A5'; }
+            else if (lang === 'java') { iconClass = 'codicon-symbol-class'; iconColor = '#b07219'; }
+            else if (lang === 'javascript' || lang === 'typescript') { iconClass = 'codicon-symbol-class'; iconColor = '#f1e05a'; }
 
             const isActive = id === state.activeFileId ? 'active' : '';
 
             html += `
                 <div class="file-item ${isActive}" data-file-id="${id}" onclick="openFile('${id}')">
-                    <svg class="file-icon" viewBox="0 0 16 16" fill="${iconColor}"><path d="M13.71 4.29l-3-3L10 1H4a1 1 0 00-1 1v12a1 1 0 001 1h8a1 1 0 001-1V5l-.29-.71zM10 2.41L12.59 5H10V2.41zM4 14V2h5v4h4v8H4z"/></svg>
-                    ${file.name}
+                    <i class="codicon ${iconClass} file-icon" style="color: ${iconColor}; margin-right: 6px;"></i>
+                    <span style="flex:1;">${file.name}</span>
                     ${state.userRole !== 'viewer' && state.files.size > 1 ? `
-                    <div class="file-actions">
-                        <svg class="file-action-icon" viewBox="0 0 16 16" fill="currentColor" onclick="event.stopPropagation(); deleteFile('${id}')"><path fill-rule="evenodd" d="M6.5 1.75a.25.25 0 01.25-.25h2.5a.25.25 0 01.25.25V3h-3V1.75zm4.5 0V3h2.25a.75.75 0 010 1.5H2.75a.75.75 0 010-1.5H5V1.75C5 .784 5.784 0 6.75 0h2.5C10.216 0 11 .784 11 1.75zM4.496 6.675a.75.75 0 10-1.492.15l.66 6.6A1.75 1.75 0 005.405 15h5.19c.9 0 1.652-.681 1.741-1.576l.66-6.6a.75.75 0 00-1.492-.149l-.66 6.6a.25.25 0 01-.249.225h-5.19a.25.25 0 01-.249-.225l-.66-6.6z"/></svg>
+                    <div class="file-actions" style="opacity:0; display:flex; align-items:center;">
+                        <button class="btn btn-icon btn-xs file-action-icon" style="background:none;border:none;color:inherit;cursor:pointer;padding:2px;" onclick="event.stopPropagation(); deleteFile('${id}')" title="Delete">
+                            <i class="codicon codicon-trash"></i>
+                        </button>
                     </div>` : ''}
                 </div>
             `;
         });
 
         fileTree.innerHTML = html;
+        
+        // Add hover effect for file actions
+        fileTree.querySelectorAll('.file-item').forEach(item => {
+            item.addEventListener('mouseenter', () => {
+                const actions = item.querySelector('.file-actions');
+                if(actions) actions.style.opacity = '1';
+            });
+            item.addEventListener('mouseleave', () => {
+                const actions = item.querySelector('.file-actions');
+                if(actions) actions.style.opacity = '0';
+            });
+        });
     }
 
     function renderTabs() {
@@ -1046,18 +1062,22 @@
             }
             
             const lang = file.language || 'javascript';
-            let iconColor = '#519aba'; // default ts/js blue
-            if (lang === 'html') iconColor = '#e34c26';
-            if (lang === 'css') iconColor = '#264de4';
-            if (lang === 'python') iconColor = '#3572A5';
-            if (lang === 'java') iconColor = '#b07219';
+            let iconClass = 'codicon-file';
+            let iconColor = '#519aba';
+            if (lang === 'html') { iconClass = 'codicon-code'; iconColor = '#e34c26'; }
+            else if (lang === 'css') { iconClass = 'codicon-symbol-color'; iconColor = '#563d7c'; }
+            else if (lang === 'python') { iconClass = 'codicon-symbol-misc'; iconColor = '#3572A5'; }
+            else if (lang === 'java') { iconClass = 'codicon-symbol-class'; iconColor = '#b07219'; }
+            else if (lang === 'javascript' || lang === 'typescript') { iconClass = 'codicon-symbol-class'; iconColor = '#f1e05a'; }
 
             const isActive = id === state.activeFileId ? 'active' : '';
             html += `
                 <div class="editor-tab ${isActive}" data-file-id="${id}" onclick="openFile('${id}')">
-                    <svg class="file-icon" viewBox="0 0 16 16" fill="${iconColor}" style="margin-right: 6px; width: 14px; height: 14px;"><path d="M13.71 4.29l-3-3L10 1H4a1 1 0 00-1 1v12a1 1 0 001 1h8a1 1 0 001-1V5l-.29-.71zM10 2.41L12.59 5H10V2.41zM4 14V2h5v4h4v8H4z"/></svg>
+                    <i class="codicon ${iconClass} tab-icon" style="color: ${iconColor}; margin-right: 6px;"></i>
                     <span class="tab-title">${file.name}</span>
-                    <div class="tab-close" onclick="event.stopPropagation(); closeTab('${id}')">✕</div>
+                    <button class="btn btn-icon btn-xs tab-close" onclick="event.stopPropagation(); closeTab('${id}')" style="background:none;border:none;color:inherit;cursor:pointer;">
+                        <i class="codicon codicon-close"></i>
+                    </button>
                 </div>
             `;
         });

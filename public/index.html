@@ -24,6 +24,8 @@
   <!-- Monaco Editor Loader -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.44.0/min/vs/loader.min.js"></script>
   
+  <!-- VS Code Icons -->
+  <link href="https://unpkg.com/@vscode/codicons/dist/codicon.css" rel="stylesheet" />
   <!-- Styles -->
   <link rel="stylesheet" href="/css/style.css">
 </head>
@@ -304,11 +306,19 @@
     <!-- VS Code Top Title Bar -->
     <div class="vscode-titlebar">
       <div class="vscode-titlebar-left">
-        <button class="btn btn-icon btn-xs" id="back-to-dashboard" title="Back to dashboard">
-          <svg viewBox="0 0 20 20" fill="currentColor" width="16" height="16">
-            <path fill-rule="evenodd" d="M9.707 16.707a1 1 0 01-1.414 0l-6-6a1 1 0 010-1.414l6-6a1 1 0 011.414 1.414L5.414 9H17a1 1 0 110 2H5.414l4.293 4.293a1 1 0 010 1.414z" clip-rule="evenodd" />
-          </svg>
-        </button>
+        <div class="vscode-logo">
+          <i class="codicon codicon-vscode"></i>
+        </div>
+        <div class="vscode-menubar">
+          <div class="menubar-item">File</div>
+          <div class="menubar-item">Edit</div>
+          <div class="menubar-item">Selection</div>
+          <div class="menubar-item">View</div>
+          <div class="menubar-item">Go</div>
+          <div class="menubar-item">Run</div>
+          <div class="menubar-item">Terminal</div>
+          <div class="menubar-item">Help</div>
+        </div>
       </div>
       <div class="vscode-titlebar-center">
         <span id="editor-session-title" class="session-title-text">Session</span>
@@ -323,20 +333,41 @@
         <div class="collaborators" id="collaborators-list">
           <!-- User avatars appear here -->
         </div>
+        <div class="window-controls">
+          <button class="window-control" id="back-to-dashboard" title="Back to dashboard">
+            <i class="codicon codicon-chrome-close"></i>
+          </button>
+        </div>
       </div>
     </div>
 
     <div class="vscode-body">
       <!-- Activity Bar -->
       <div class="vscode-activity-bar">
-        <div class="activity-action active" title="Explorer">
-          <svg viewBox="0 0 24 24" fill="currentColor" width="24" height="24"><path d="M4 4h8v2H4V4zm0 4h16v2H4V8zm0 4h16v2H4v-2zm0 4h16v2H4v-2z"/></svg>
+        <div class="activity-actions-top">
+          <div class="activity-action active" title="Explorer">
+            <i class="codicon codicon-files"></i>
+          </div>
+          <div class="activity-action" title="Search">
+            <i class="codicon codicon-search"></i>
+          </div>
+          <div class="activity-action" title="Source Control">
+            <i class="codicon codicon-source-control"></i>
+          </div>
+          <div class="activity-action" title="Run and Debug">
+            <i class="codicon codicon-debug-alt"></i>
+          </div>
+          <div class="activity-action" title="Extensions">
+            <i class="codicon codicon-extensions"></i>
+          </div>
         </div>
-        <div class="activity-action" title="Search">
-          <svg viewBox="0 0 24 24" fill="currentColor" width="24" height="24"><path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0016 9.5 6.5 6.5 0 109.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
-        </div>
-        <div class="activity-action" title="Source Control">
-          <svg viewBox="0 0 24 24" fill="currentColor" width="24" height="24"><path d="M15 4h2v16h-2V4zm-6 0h2v16H9V4zM3 4h2v16H3V4z"/></svg>
+        <div class="activity-actions-bottom">
+          <div class="activity-action" title="Accounts">
+            <i class="codicon codicon-account"></i>
+          </div>
+          <div class="activity-action" title="Manage">
+            <i class="codicon codicon-settings-gear"></i>
+          </div>
         </div>
       </div>
 
@@ -344,16 +375,28 @@
       <div class="vscode-sidebar">
         <div class="sidebar-header">
           <span>EXPLORER</span>
+          <div class="sidebar-header-actions">
+            <i class="codicon codicon-ellipsis"></i>
+          </div>
         </div>
         <div class="sidebar-section">
           <div class="sidebar-section-header">
-            <svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M4.5 5L8 8.5 11.5 5h-7z"/></svg>
+            <i class="codicon codicon-chevron-down"></i>
             <span class="section-title" style="flex:1;">WORKSPACE</span>
-            <button class="btn btn-icon btn-xs" id="create-file-action" title="New File" style="background:none;border:none;cursor:pointer;opacity:0.8;color:inherit;">
-              <svg viewBox="0 0 16 16" fill="currentColor" width="14" height="14">
-                <path fill-rule="evenodd" d="M2 1.75C2 .784 2.784 0 3.75 0h6.586a.25.25 0 01.177.073l2.664 2.664a.25.25 0 01.073.177V14.25A1.75 1.75 0 0111.5 16h-7.75A1.75 1.75 0 012 14.25V1.75zm1.75-.25a.25.25 0 00-.25.25v12.5c0 .138.112.25.25.25h7.75a.25.25 0 00.25-.25V4.664a.25.25 0 00-.073-.177l-2.664-2.664a.25.25 0 00-.177-.073H3.75zM8 5a.75.75 0 01.75.75v1.5h1.5a.75.75 0 010 1.5h-1.5v1.5a.75.75 0 01-1.5 0v-1.5h-1.5a.75.75 0 010-1.5h1.5v-1.5A.75.75 0 018 5z"/>
-              </svg>
-            </button>
+            <div class="sidebar-section-actions">
+              <button class="btn btn-icon btn-xs" id="create-file-action" title="New File" style="background:none;border:none;cursor:pointer;opacity:0.8;color:inherit;padding:0;">
+                <i class="codicon codicon-new-file"></i>
+              </button>
+              <button class="btn btn-icon btn-xs" title="New Folder" style="background:none;border:none;cursor:pointer;opacity:0.8;color:inherit;padding:0;">
+                <i class="codicon codicon-new-folder"></i>
+              </button>
+              <button class="btn btn-icon btn-xs" title="Refresh Explorer" style="background:none;border:none;cursor:pointer;opacity:0.8;color:inherit;padding:0;">
+                <i class="codicon codicon-refresh"></i>
+              </button>
+              <button class="btn btn-icon btn-xs" title="Collapse Folders in Explorer" style="background:none;border:none;cursor:pointer;opacity:0.8;color:inherit;padding:0;">
+                <i class="codicon codicon-collapse-all"></i>
+              </button>
+            </div>
           </div>
           <div class="file-tree" id="file-tree">
             <!-- Files populated here -->
@@ -368,28 +411,17 @@
             <!-- Tabs populated here -->
           </div>
           <div class="vscode-editor-actions">
-            <!-- Language selector inside editor actions -->
-            <select id="language-selector" class="toolbar-select vscode-select" title="Programming language">
-              <option value="javascript">JavaScript</option>
-              <option value="python">Python</option>
-              <option value="typescript">TypeScript</option>
-              <option value="java">Java</option>
-              <option value="cpp">C++</option>
-              <option value="csharp">C#</option>
-              <option value="go">Go</option>
-              <option value="rust">Rust</option>
-              <option value="php">PHP</option>
-              <option value="ruby">Ruby</option>
-              <option value="html">HTML</option>
-              <option value="css">CSS</option>
-              <option value="sql">SQL</option>
-              <option value="markdown">Markdown</option>
-            </select>
-            <button class="vscode-action-btn" id="run-code-btn" title="Run code (Ctrl+Enter)">
-              <svg viewBox="0 0 16 16" fill="currentColor" width="16" height="16"><path d="M3 2v12l10-6L3 2z"/></svg>
+            <button class="vscode-action-btn" id="run-code-btn" title="Run Code (Ctrl+Enter)">
+              <i class="codicon codicon-play"></i>
             </button>
-            <button class="vscode-action-btn" id="copy-session-link" title="Copy invite link">
-              <svg viewBox="0 0 16 16" fill="currentColor" width="16" height="16"><path d="M2 1v11h2v-2h8V1H2zm9 8H5V3h6v6z"/><path d="M5 12h8v-8h-2v2h2v4H7v-2H5v4z"/></svg>
+            <button class="vscode-action-btn" title="Split Editor Right">
+              <i class="codicon codicon-split-horizontal"></i>
+            </button>
+            <button class="vscode-action-btn" id="copy-session-link" title="Copy Invite Link">
+              <i class="codicon codicon-link"></i>
+            </button>
+            <button class="vscode-action-btn" title="More Actions...">
+              <i class="codicon codicon-ellipsis"></i>
             </button>
           </div>
         </div>
@@ -415,14 +447,22 @@
         <div id="preview-panel" class="vscode-panel" style="display:none;">
           <div class="vscode-panel-header">
             <div class="vscode-panel-tabs">
+              <div class="vscode-panel-tab">PROBLEMS</div>
+              <div class="vscode-panel-tab">OUTPUT</div>
+              <div class="vscode-panel-tab">DEBUG CONSOLE</div>
+              <div class="vscode-panel-tab">TERMINAL</div>
+              <div class="vscode-panel-tab active">PORTS</div>
               <div class="vscode-panel-tab active">PREVIEW</div>
             </div>
             <div class="vscode-panel-actions">
               <button class="vscode-action-btn" id="open-preview-new-tab" title="Open in new tab">
-                <svg viewBox="0 0 16 16" fill="currentColor" width="16" height="16"><path d="M1 2v12h12v-2h-2v-8h-8v-2H1zm3 3v8h8v-8H4z"/></svg>
+                <i class="codicon codicon-link-external"></i>
+              </button>
+              <button class="vscode-action-btn" title="Maximize Panel Size">
+                <i class="codicon codicon-chevron-up"></i>
               </button>
               <button class="vscode-action-btn" id="close-preview-btn" title="Close Panel">
-                <svg viewBox="0 0 16 16" fill="currentColor" width="16" height="16"><path d="M4 4l8 8m0-8l-8 8" stroke="currentColor" stroke-width="1.5"/></svg>
+                <i class="codicon codicon-close"></i>
               </button>
             </div>
           </div>
@@ -432,16 +472,22 @@
         <div id="output-panel" class="vscode-panel" style="display:none;">
           <div class="vscode-panel-header">
             <div class="vscode-panel-tabs">
+              <div class="vscode-panel-tab">PROBLEMS</div>
               <div class="vscode-panel-tab active">OUTPUT</div>
+              <div class="vscode-panel-tab">DEBUG CONSOLE</div>
               <div class="vscode-panel-tab">TERMINAL</div>
+              <div class="vscode-panel-tab">PORTS</div>
             </div>
             <div class="vscode-panel-actions">
-              <span class="output-exec-time" id="exec-time"></span>
-              <button class="vscode-action-btn" id="clear-output-btn" title="Clear output">
-                <svg viewBox="0 0 16 16" fill="currentColor" width="16" height="16"><path d="M3 3v10h10V3H3zm2 2h6v6H5V5z"/></svg>
+              <span class="output-exec-time" id="exec-time" style="font-size: 11px; margin-right: 8px;"></span>
+              <button class="vscode-action-btn" id="clear-output-btn" title="Clear Output">
+                <i class="codicon codicon-clear-all"></i>
+              </button>
+              <button class="vscode-action-btn" title="Maximize Panel Size">
+                <i class="codicon codicon-chevron-up"></i>
               </button>
               <button class="vscode-action-btn" id="close-output-btn" title="Close Panel">
-                <svg viewBox="0 0 16 16" fill="currentColor" width="16" height="16"><path d="M4 4l8 8m0-8l-8 8" stroke="currentColor" stroke-width="1.5"/></svg>
+                <i class="codicon codicon-close"></i>
               </button>
             </div>
           </div>
@@ -453,13 +499,49 @@
     <!-- VS Code Status Bar -->
     <div class="vscode-statusbar">
       <div class="statusbar-left">
-        <span class="statusbar-item" style="background:#007acc; padding:0 10px; color:#fff; font-weight:bold;">CodeMesh</span>
-        <span class="statusbar-item"><svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 2a6 6 0 100 12A6 6 0 008 2zM3.5 8a4.5 4.5 0 119 0 4.5 4.5 0 01-9 0z"/></svg> Live</span>
-        <span class="statusbar-item" id="statusbar-save" style="cursor:pointer" title="Click to manually save"><svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M4 2v12h8V4l-2-2H4zm2 2h2v4H6V4zm-1 6h6v3H5v-3z"/></svg> Auto-saving</span>
+        <span class="statusbar-item remote-indicator" style="background:#007acc; padding:0 10px; color:#fff; font-weight:bold; cursor:pointer;">
+          <i class="codicon codicon-remote"></i> CodeMesh
+        </span>
+        <span class="statusbar-item" title="CodeMesh Source Control">
+          <i class="codicon codicon-source-control"></i> main*
+        </span>
+        <span class="statusbar-item" title="0 Errors, 0 Warnings">
+          <i class="codicon codicon-error"></i> 0 <i class="codicon codicon-warning" style="margin-left: 4px;"></i> 0
+        </span>
+        <span class="statusbar-item" id="statusbar-save" style="cursor:pointer" title="Click to manually save">
+          <i class="codicon codicon-sync"></i> Auto-saving
+        </span>
       </div>
       <div class="statusbar-right">
+        <span class="statusbar-item" id="statusbar-cursor">Ln 1, Col 1</span>
+        <span class="statusbar-item">Spaces: 4</span>
         <span class="statusbar-item">UTF-8</span>
-        <span class="statusbar-item" id="statusbar-lang">JavaScript</span>
+        <span class="statusbar-item">CRLF</span>
+        <span class="statusbar-item">
+          <select id="language-selector" class="statusbar-select" title="Select Language Mode">
+            <option value="javascript">JavaScript</option>
+            <option value="python">Python</option>
+            <option value="typescript">TypeScript</option>
+            <option value="java">Java</option>
+            <option value="cpp">C++</option>
+            <option value="csharp">C#</option>
+            <option value="go">Go</option>
+            <option value="rust">Rust</option>
+            <option value="php">PHP</option>
+            <option value="ruby">Ruby</option>
+            <option value="html">HTML</option>
+            <option value="css">CSS</option>
+            <option value="sql">SQL</option>
+            <option value="markdown">Markdown</option>
+          </select>
+        </span>
+        <span class="statusbar-item" title="Prettier">Prettier</span>
+        <span class="statusbar-item" title="Feedback">
+          <i class="codicon codicon-feedback"></i>
+        </span>
+        <span class="statusbar-item" title="Notifications">
+          <i class="codicon codicon-bell"></i>
+        </span>
       </div>
     </div>
   </div>
