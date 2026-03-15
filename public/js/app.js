@@ -357,12 +357,15 @@
 
     // ─── CodeMirror / Monaco Setup ───
     let monacoLoaded = false;
+    let monacoLoadingPromise = null;
     let remoteDecorations = null;
     let commentDecorations = null;
 
     async function loadMonaco() {
         if (monacoLoaded) return;
-        return new Promise((resolve) => {
+        if (monacoLoadingPromise) return monacoLoadingPromise;
+        
+        monacoLoadingPromise = new Promise((resolve) => {
             if (window.monaco) {
                 monacoLoaded = true;
                 resolve();
@@ -374,6 +377,7 @@
                 resolve();
             });
         });
+        return monacoLoadingPromise;
     }
 
     function mapLanguageToMonaco(lang) {
