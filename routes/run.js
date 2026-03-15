@@ -1,6 +1,6 @@
 const express = require('express');
 const { spawn } = require('child_process');
-const fs = require('fs');
+const fs = require('fs').promises;
 const path = require('path');
 const os = require('os');
 const { v4: uuidv4 } = require('uuid');
@@ -125,7 +125,7 @@ router.post('/', authMiddleware, async (req, res) => {
 
     // Create temp file
     const tmpDir = path.join(os.tmpdir(), 'codemesh-' + uuidv4());
-    fs.mkdirSync(tmpDir, { recursive: true });
+    await fs.mkdir(tmpDir, { recursive: true });
 
     const fileName = language === 'java' ? 'Main.java' : `main${runner.ext}`;
     const filePath = path.join(tmpDir, fileName);
@@ -138,7 +138,7 @@ router.post('/', authMiddleware, async (req, res) => {
             processedCode = `public class Main {\n${code}\n}`;
         }
 
-        fs.writeFileSync(filePath, processedCode);
+        await fs.writeFile(filePath, processedCode);
 
         // Compile step (if needed)
         if (runner.compile) {
@@ -190,8 +190,10 @@ router.post('/', authMiddleware, async (req, res) => {
     } finally {
         // Cleanup temp files
         try {
-            fs.rmSync(tmpDir, { recursive: true, force: true });
-        } catch { }
+            await fs.rm(tmpDir, { recursive: true, force: true });
+        } catch (err) {
+            console.error('Run cleanup error:', err.message);
+        }
     }
 });
 

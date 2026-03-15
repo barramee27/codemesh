@@ -8,12 +8,17 @@ const path = require('path');
 const compression = require('compression');
 const rateLimit = require('express-rate-limit');
 
+const jwt = require('jsonwebtoken');
+const User = require('./models/User');
+const Session = require('./models/Session');
 const authRoutes = require('./routes/auth');
 const sessionRoutes = require('./routes/sessions');
 const runRoutes = require('./routes/run');
 const terminalRoutes = require('./routes/terminal');
 const adminRoutes = require('./routes/admin');
 const setupCollaboration = require('./sockets/collaboration');
+
+const JWT_SECRET = process.env.JWT_SECRET || 'fallback_secret';
 
 const app = express();
 const server = http.createServer(app);
@@ -33,7 +38,10 @@ const io = new Server(server, {
 // ─── Middleware ───
 app.set('trust proxy', 1);  // Required for rate limit behind Railway/nginx
 app.use(compression());  // Gzip all HTTP responses
-app.use(cors());
+const allowedOrigins = process.env.ALLOWED_ORIGINS
+    ? process.env.ALLOWED_ORIGINS.split(',').map(o => o.trim()).filter(Boolean)
+    : '*';
+app.use(cors({ origin: allowedOrigins }));
 app.use(express.json({ limit: '10mb' }));
 
 // Static files with cache headers (1 day for assets)
@@ -73,6 +81,31 @@ const MONGO_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/codemesh
 mongoose.connect(MONGO_URI)
     .then(() => {
         console.log('✓ MongoDB connected');
+
+        // Socket.IO auth: verify JWT and attach user
+        io.use(async (socket, next) => {
+            const token = socket.handshake.auth?.token;
+            if (!token) {
+                return next(new Error('Authentication required'));
+            }
+            try {
+                const decoded = jwt.verify(token, JWT_SECRET);
+                const user = await User.findById(decoded.id).select('username email role banned');
+                if (!user || user.banned) {
+                    return next(new Error('Invalid or banned user'));
+                }
+                socket.user = {
+                    id: user._id.toString(),
+                    username: user.username,
+                    email: user.email,
+                    role: user.role
+                };
+                next();
+            } catch (err) {
+                next(new Error('Invalid token'));
+            }
+        });
+
         const { saveAllSessions } = setupCollaboration(io);
         server.listen(PORT, () => {
             console.log(`✓ CodeMesh server running on http://localhost:${PORT}`);

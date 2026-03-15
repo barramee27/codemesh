@@ -103,6 +103,7 @@
             </div>
           </div>
           <div id="login-error" class="form-error"></div>
+          <button type="button" class="btn btn-ghost btn-sm" id="forgot-password-link" style="margin-bottom:12px;">Forgot password?</button>
           <button type="submit" class="btn btn-primary btn-full" id="login-btn">
             <span>Sign In</span>
             <svg class="btn-arrow" viewBox="0 0 20 20" fill="currentColor">
@@ -116,6 +117,28 @@
           </div>
           <button type="button" class="btn btn-ghost btn-full" id="guest-btn">
             <span>Continue as Guest</span>
+          </button>
+        </form>
+
+        <!-- Forgot Password Form -->
+        <form id="forgot-password-form" class="auth-form" style="display:none;">
+          <div class="form-group">
+            <label for="forgot-email">Email</label>
+            <div class="input-wrapper">
+              <svg class="input-icon" viewBox="0 0 20 20" fill="currentColor">
+                <path d="M2.003 5.884L10 9.882l7.997-3.998A2 2 0 0016 4H4a2 2 0 00-1.997 1.884z" />
+                <path d="M18 8.118l-8 4-8-4V14a2 2 0 002 2h12a2 2 0 002-2V8.118z" />
+              </svg>
+              <input type="email" id="forgot-email" placeholder="you@example.com" required autocomplete="email">
+            </div>
+          </div>
+          <div id="forgot-error" class="form-error"></div>
+          <div id="forgot-success" class="form-success" style="display:none;"></div>
+          <button type="submit" class="btn btn-primary btn-full" id="forgot-btn">
+            <span>Send reset link</span>
+          </button>
+          <button type="button" class="btn btn-ghost btn-full" id="back-to-login">
+            <span>Back to Sign In</span>
           </button>
         </form>
 
@@ -169,6 +192,38 @@
       
       <!-- ADDED FOOTER CREDIT HERE -->
       <div class="creator-credit">created by barramee kottanawadee</div>
+    </div>
+  </div>
+
+  <!-- ═══════════════ RESET PASSWORD VIEW ═══════════════ -->
+  <div id="reset-password-view" class="view" style="display:none;">
+    <div class="auth-bg">
+      <div class="auth-particles" id="reset-particles"></div>
+      <div class="auth-container">
+        <div class="auth-header">
+          <h1 class="logo-text">Code<span>Mesh</span></h1>
+          <p class="auth-subtitle">Set a new password</p>
+        </div>
+        <form id="reset-password-form" class="auth-form">
+          <div class="form-group">
+            <label for="reset-new-password">New password</label>
+            <div class="input-wrapper">
+              <input type="password" id="reset-new-password" placeholder="Minimum 6 characters" required minlength="6" autocomplete="new-password">
+            </div>
+          </div>
+          <div class="form-group">
+            <label for="reset-confirm-password">Confirm password</label>
+            <div class="input-wrapper">
+              <input type="password" id="reset-confirm-password" placeholder="Confirm new password" required minlength="6" autocomplete="new-password">
+            </div>
+          </div>
+          <div id="reset-error" class="form-error"></div>
+          <button type="submit" class="btn btn-primary btn-full" id="reset-btn">
+            <span>Reset password</span>
+          </button>
+          <a href="/" class="btn btn-ghost btn-full" style="margin-top:8px;text-align:center;">Back to Sign In</a>
+        </form>
+      </div>
     </div>
   </div>
 

@@ -97,8 +97,31 @@ module.exports = function setupCollaboration(io) {
     io.on('connection', (socket) => {
 
         socket.on('join-session', async (data) => {
-            const { sessionId, username, userId } = data;
+            const { sessionId } = data;
             if (!sessionId) return;
+
+            // Use server-verified user from auth middleware (client values are ignored)
+            const username = socket.user ? socket.user.username : 'Anonymous';
+            const userId = socket.user ? socket.user.id : null;
+
+            // Validate session access
+            try {
+                const dbSession = await Session.findOne({ sessionId });
+                if (!dbSession) {
+                    socket.emit('join-error', { message: 'Session not found' });
+                    return;
+                }
+                const isOwner = userId && dbSession.owner.toString() === userId;
+                const isCollab = userId && dbSession.collaborators.some(c => c.user.toString() === userId);
+                const isAdmin = socket.user && socket.user.role === 'admin';
+                if (!dbSession.isPublic && !isOwner && !isCollab && !isAdmin) {
+                    socket.emit('join-error', { message: 'You do not have access to this session' });
+                    return;
+                }
+            } catch (err) {
+                socket.emit('join-error', { message: 'Failed to verify session access' });
+                return;
+            }
 
             const state = getOrCreateSessionState(sessionId);
 
@@ -112,8 +135,8 @@ module.exports = function setupCollaboration(io) {
 
             socket.join(sessionId);
             socket.sessionId = sessionId;
-            socket.username = username || 'Anonymous';
-            socket.userId = userId || null;
+            socket.username = username;
+            socket.userId = userId;
 
             // Load from DB if fresh
             let dbSession = null;
@@ -152,13 +175,15 @@ module.exports = function setupCollaboration(io) {
 
             // Determine the user's role in this session
             let userRole = 'editor'; // default for new users
-            if (!dbSession) {
+            if (socket.user && socket.user.role === 'admin') {
+                userRole = 'admin';
+            } else if (!dbSession) {
                 try {
                     dbSession = await Session.findOne({ sessionId });
                 } catch (err) { /* ignore */ }
             }
 
-            if (dbSession && userId) {
+            if (userRole !== 'admin' && dbSession && userId) {
                 if (dbSession.owner.toString() === userId) {
                     userRole = 'owner';
                 } else {
@@ -452,6 +477,31 @@ module.exports = function setupCollaboration(io) {
                     });
                 }
             }
+        });
+
+        socket.on('request-state', (data) => {
+            const { sessionId } = data;
+            if (!sessionId || socket.sessionId !== sessionId) return;
+            const state = activeSessions.get(sessionId);
+            if (!state) return;
+            const userInfo = state.users.get(socket.id);
+            if (!userInfo) return;
+            const clientFiles = {};
+            state.files.forEach((fileData, id) => {
+                clientFiles[id] = {
+                    id: fileData.id,
+                    name: fileData.name,
+                    doc: fileData.doc,
+                    language: fileData.language,
+                    version: fileData.version
+                };
+            });
+            socket.emit('session-state', {
+                files: clientFiles,
+                users: Object.fromEntries(state.users),
+                role: userInfo.role,
+                comments: state.comments
+            });
         });
 
         socket.on('disconnect', () => {

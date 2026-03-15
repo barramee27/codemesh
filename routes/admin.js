@@ -12,16 +12,12 @@ router.use(authMiddleware, adminAuth);
 // GET /api/admin/users — list all users
 router.get('/users', async (req, res) => {
     try {
-        const users = await User.find()
-            .select('username email role banned createdAt')
-            .sort({ createdAt: -1 })
-            .lean();
-
-        // Count sessions per user
-        const usersWithStats = await Promise.all(users.map(async (u) => {
-            const sessionCount = await Session.countDocuments({ owner: u._id });
-            return { ...u.toJSON(), sessionCount };
-        }));
+        const usersWithStats = await User.aggregate([
+            { $sort: { createdAt: -1 } },
+            { $lookup: { from: 'sessions', localField: '_id', foreignField: 'owner', as: 'sessions' } },
+            { $addFields: { sessionCount: { $size: '$sessions' } } },
+            { $project: { username: 1, email: 1, role: 1, banned: 1, createdAt: 1, sessionCount: 1 } }
+        ]);
 
         res.json(usersWithStats);
     } catch (err) {

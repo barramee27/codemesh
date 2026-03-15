@@ -55,6 +55,8 @@ Open source means anyone can read the code—it does *not* mean the app is safe 
 **What does the 5-second timeout mean?**  
 If a command runs longer than 5 seconds, it is stopped. This prevents long-running or infinite loops from blocking the server.
 
+**Password migration**: Existing users with legacy Base64 passwords are automatically migrated to bcrypt on their next successful login. No action required.
+
 ### Run
 
 ```bash

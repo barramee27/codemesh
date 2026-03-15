@@ -453,6 +453,12 @@ a:hover {
   padding: 6px 0;
 }
 
+.form-success {
+  color: var(--success, #22c55e);
+  font-size: 0.8rem;
+  padding: 6px 0;
+}
+
 /* ══════════════════════ */
 /* CREATOR FOOTER STYLES  */
 /* ══════════════════════ */

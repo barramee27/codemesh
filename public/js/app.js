@@ -208,6 +208,98 @@
                 btn.disabled = false;
             }
         });
+
+        // Forgot password
+        const forgotLink = document.getElementById('forgot-password-link');
+        const forgotForm = document.getElementById('forgot-password-form');
+        const backToLogin = document.getElementById('back-to-login');
+        if (forgotLink && forgotForm && backToLogin) {
+            forgotLink.addEventListener('click', () => {
+                loginForm.style.display = 'none';
+                registerForm.style.display = 'none';
+                forgotForm.style.display = '';
+                document.getElementById('forgot-error').textContent = '';
+                document.getElementById('forgot-success').style.display = 'none';
+            });
+            backToLogin.addEventListener('click', () => {
+                forgotForm.style.display = 'none';
+                loginForm.style.display = '';
+            });
+            forgotForm.addEventListener('submit', async (e) => {
+                e.preventDefault();
+                const btn = document.getElementById('forgot-btn');
+                const errorEl = document.getElementById('forgot-error');
+                const successEl = document.getElementById('forgot-success');
+                errorEl.textContent = '';
+                successEl.style.display = 'none';
+                btn.classList.add('loading');
+                try {
+                    await api('/auth/forgot-password', {
+                        method: 'POST',
+                        body: JSON.stringify({ email: document.getElementById('forgot-email').value })
+                    });
+                    successEl.textContent = 'If an account exists, a reset link has been sent to your email.';
+                    successEl.style.display = '';
+                } catch (err) {
+                    errorEl.textContent = err.message;
+                } finally {
+                    btn.classList.remove('loading');
+                }
+            });
+        }
+    }
+
+    function initResetPassword() {
+        const resetForm = document.getElementById('reset-password-form');
+        if (!resetForm) return;
+
+        resetForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const token = new URLSearchParams(window.location.search).get('token');
+            if (!token) {
+                document.getElementById('reset-error').textContent = 'Invalid or missing reset link';
+                return;
+            }
+            const newPass = document.getElementById('reset-new-password').value;
+            const confirmPass = document.getElementById('reset-confirm-password').value;
+            const errorEl = document.getElementById('reset-error');
+            const btn = document.getElementById('reset-btn');
+            errorEl.textContent = '';
+            if (newPass !== confirmPass) {
+                errorEl.textContent = 'Passwords do not match';
+                return;
+            }
+            btn.classList.add('loading');
+            try {
+                await api('/auth/reset-password', {
+                    method: 'POST',
+                    body: JSON.stringify({ token, newPassword: newPass })
+                });
+                showToast('Password reset successfully. You can now sign in.', 'success');
+                window.location.href = '/';
+            } catch (err) {
+                errorEl.textContent = err.message;
+            } finally {
+                btn.classList.remove('loading');
+            }
+        });
+    }
+
+    function initParticlesIn(container) {
+        if (!container) return;
+        container.innerHTML = '';
+        for (let i = 0; i < 40; i++) {
+            const p = document.createElement('div');
+            p.className = 'particle';
+            p.style.left = Math.random() * 100 + '%';
+            p.style.top = Math.random() * 100 + '%';
+            p.style.animationDelay = Math.random() * 4 + 's';
+            p.style.animationDuration = (3 + Math.random() * 3) + 's';
+            p.style.width = p.style.height = (2 + Math.random() * 4) + 'px';
+            const colors = ['#6C5CE7', '#00CEFF', '#a78bfa', '#45B7D1'];
+            p.style.background = colors[Math.floor(Math.random() * colors.length)];
+            container.appendChild(p);
+        }
     }
 
     // ─── Logout ───
@@ -313,7 +405,7 @@
 
     // ─── Dashboard Event Handlers ───
     function initDashboard() {
-        document.getElementById('logout-btn').addEventListener('click', logout);
+        document.getElementById('logout-btn')?.addEventListener('click', logout);
 
         // Create session modal
         const createBtn = document.getElementById('create-session-btn');
@@ -321,17 +413,17 @@
         const cancelBtn = document.getElementById('cancel-create-btn');
         const createForm = document.getElementById('create-session-form');
 
-        createBtn.addEventListener('click', () => modal.style.display = '');
-        cancelBtn.addEventListener('click', () => modal.style.display = 'none');
-        modal.querySelector('.modal-backdrop').addEventListener('click', () => modal.style.display = 'none');
+        createBtn?.addEventListener('click', () => { if (modal) modal.style.display = ''; });
+        cancelBtn?.addEventListener('click', () => { if (modal) modal.style.display = 'none'; });
+        modal?.querySelector('.modal-backdrop')?.addEventListener('click', () => { modal.style.display = 'none'; });
 
-        createForm.addEventListener('submit', async (e) => {
+        createForm?.addEventListener('submit', async (e) => {
             e.preventDefault();
             try {
-                const customId = document.getElementById('custom-session-id').value.trim();
+                const customId = document.getElementById('custom-session-id')?.value?.trim();
                 const body = {
-                    title: document.getElementById('session-title').value,
-                    language: document.getElementById('session-language').value
+                    title: document.getElementById('session-title')?.value,
+                    language: document.getElementById('session-language')?.value
                 };
                 if (customId) body.customSessionId = customId;
 
@@ -339,8 +431,8 @@
                     method: 'POST',
                     body: JSON.stringify(body)
                 });
-                modal.style.display = 'none';
-                createForm.reset();
+                if (modal) modal.style.display = 'none';
+                if (createForm) createForm.reset();
                 showToast('Session created!', 'success');
                 openEditor(session.sessionId);
             } catch (err) {
@@ -349,14 +441,14 @@
         });
 
         // Join session
-        document.getElementById('join-session-btn').addEventListener('click', () => {
-            const id = document.getElementById('join-session-id').value.trim();
+        document.getElementById('join-session-btn')?.addEventListener('click', () => {
+            const id = document.getElementById('join-session-id')?.value?.trim();
             if (!id) return showToast('Enter a session ID', 'error');
             openEditor(id);
         });
 
-        document.getElementById('join-session-id').addEventListener('keydown', (e) => {
-            if (e.key === 'Enter') document.getElementById('join-session-btn').click();
+        document.getElementById('join-session-id')?.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') document.getElementById('join-session-btn')?.click();
         });
     }
 
@@ -720,7 +812,8 @@
         state.socket = io({
             transports: ['websocket'],
             reconnectionAttempts: 5,
-            reconnectionDelay: 1000
+            reconnectionDelay: 1000,
+            auth: { token: state.token || '' }
         });
 
         state.socket.on('connect', () => {
@@ -1046,7 +1139,7 @@
             html += `
                 <div class="file-item ${isActive}" data-file-id="${id}" onclick="openFile('${id}')">
                     <i class="codicon ${iconClass} file-icon" style="color: ${iconColor}; margin-right: 6px;"></i>
-                    <span style="flex:1;">${file.name}</span>
+                    <span style="flex:1;">${escapeHtml(file.name)}</span>
                     ${state.userRole !== 'viewer' && state.files.size > 1 ? `
                     <div class="file-actions" style="opacity:0; display:flex; align-items:center;">
                         <button class="btn btn-icon btn-xs file-action-icon" style="background:none;border:none;color:inherit;cursor:pointer;padding:2px;" onclick="event.stopPropagation(); deleteFile('${id}')" title="Delete">
@@ -1097,7 +1190,7 @@
             html += `
                 <div class="editor-tab ${isActive}" data-file-id="${id}" onclick="openFile('${id}')">
                     <i class="codicon ${iconClass} tab-icon" style="color: ${iconColor}; margin-right: 6px;"></i>
-                    <span class="tab-title">${file.name}</span>
+                    <span class="tab-title">${escapeHtml(file.name)}</span>
                     <button class="btn btn-icon btn-xs tab-close" onclick="event.stopPropagation(); closeTab('${id}')" style="background:none;border:none;color:inherit;cursor:pointer;">
                         <i class="codicon codicon-close"></i>
                     </button>
@@ -1382,8 +1475,9 @@
 
     // ─── Editor Toolbar Events ───
     function initEditorToolbar() {
+        if (!document.getElementById('back-to-dashboard') || !document.getElementById('panel-tabs')) return;
         const backBtn = document.getElementById('back-to-dashboard');
-        backBtn?.addEventListener('click', () => {
+        backBtn.addEventListener('click', () => {
             if (state.socket) { state.socket.disconnect(); state.socket = null; }
             if (state.splitEditor) { state.splitEditor.dispose(); state.splitEditor = null; }
             if (state.editorView) { state.editorView.dispose(); state.editorView = null; }
@@ -1570,6 +1664,7 @@
             if (!state.editorView) return;
             const container2 = document.getElementById('editor-container-2');
             const splitContainer = document.getElementById('editor-split-container');
+            if (!container2 || !splitContainer) return;
             if (state.splitActive && state.splitEditor) {
                 state.splitEditor.dispose();
                 state.splitEditor = null;
@@ -1727,6 +1822,7 @@
 
     // ─── Utilities ───
     function escapeHtml(str) {
+        if (str == null) return '';
         const div = document.createElement('div');
         div.textContent = str;
         return div.innerHTML;
@@ -1744,27 +1840,21 @@
         return new Date(dateStr).toLocaleDateString();
     }
 
-    // ═══════════ ADMIN PANEL ═══════════
+        // ═══════════ ADMIN PANEL ═══════════
     function initAdminPanel() {
-        // Admin button in dashboard nav
-        document.getElementById('admin-panel-btn').addEventListener('click', () => {
-            loadAdminPanel();
-        });
+        document.getElementById('admin-panel-btn')?.addEventListener('click', () => loadAdminPanel());
+        document.getElementById('admin-back-btn')?.addEventListener('click', () => loadDashboard());
 
-        // Back button
-        document.getElementById('admin-back-btn').addEventListener('click', () => {
-            loadDashboard();
-        });
-
-        // Admin tabs
         document.querySelectorAll('.admin-tab').forEach(tab => {
-            tab.addEventListener('click', () => {
+            tab?.addEventListener('click', () => {
                 document.querySelectorAll('.admin-tab').forEach(t => t.classList.remove('active'));
                 tab.classList.add('active');
 
                 const target = tab.dataset.adminTab;
-                document.getElementById('admin-users-panel').style.display = target === 'users' ? '' : 'none';
-                document.getElementById('admin-sessions-panel').style.display = target === 'sessions' ? '' : 'none';
+                const usersPanel = document.getElementById('admin-users-panel');
+                const sessionsPanel = document.getElementById('admin-sessions-panel');
+                if (usersPanel) usersPanel.style.display = target === 'users' ? '' : 'none';
+                if (sessionsPanel) sessionsPanel.style.display = target === 'sessions' ? '' : 'none';
             });
         });
     }
@@ -1880,6 +1970,7 @@
     function init() {
         initAuthTabs();
         initAuth();
+        initResetPassword();
         initDashboard();
         initEditorToolbar();
         initAdminPanel();
@@ -1889,7 +1980,12 @@
             const overlay = document.getElementById('loading-overlay');
             overlay.classList.add('hidden');
 
-            if (state.token && state.user) {
+            const params = new URLSearchParams(window.location.search);
+            if (window.location.pathname === '/reset-password' && params.get('token')) {
+                showView('reset-password');
+                const container = document.getElementById('reset-particles');
+                if (container) initParticlesIn(container);
+            } else if (state.token && state.user) {
                 loadDashboard();
             } else {
                 showView('auth');

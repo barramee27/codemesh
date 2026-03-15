@@ -1,21 +1,40 @@
 const express = require('express');
 const jwt = require('jsonwebtoken');
+const { Resend } = require('resend');
 const User = require('../models/User');
 const { v4: uuidv4 } = require('uuid');
 
 const router = express.Router();
-const JWT_SECRET = process.env.JWT_SECRET || 'fallback_secret';
 
-// Admin credentials
-const ADMIN_EMAIL = 'barramee25038@gmail.com';
-const ADMIN_USERNAME = 'barramee27';
+const JWT_SECRET = process.env.JWT_SECRET;
+const ADMIN_EMAILS = (process.env.ADMIN_EMAILS || '')
+    .split(',')
+    .map(e => e.trim().toLowerCase())
+    .filter(Boolean);
+const APP_URL = process.env.APP_URL || 'https://codemesh.org';
+const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
+
+if (process.env.NODE_ENV === 'production' && !JWT_SECRET) {
+    console.error('FATAL: JWT_SECRET is required in production');
+    process.exit(1);
+}
+
+function getJwtSecret() {
+    return JWT_SECRET || 'fallback_secret';
+}
 
 function generateToken(user) {
     return jwt.sign(
         { id: user._id, username: user.username, email: user.email, role: user.role },
-        JWT_SECRET,
+        getJwtSecret(),
         { expiresIn: '7d' }
     );
+}
+
+function isAdmin(email, username) {
+    const e = (email || '').toLowerCase();
+    const u = (username || '').toLowerCase();
+    return ADMIN_EMAILS.some(a => a === e || a === u);
 }
 
 // POST /api/auth/register
@@ -35,14 +54,11 @@ router.post('/register', async (req, res) => {
             return res.status(409).json({ error: 'Username or email already taken' });
         }
 
-        // Auto-assign admin role
-        const isAdmin = (email.toLowerCase() === ADMIN_EMAIL || username.toLowerCase() === ADMIN_USERNAME.toLowerCase());
-
         const user = new User({
             username,
             email,
             passwordHash: password,
-            role: isAdmin ? 'admin' : 'user'
+            role: isAdmin(email, username) ? 'admin' : 'user'
         });
         await user.save();
 
@@ -72,7 +88,7 @@ router.post('/login', async (req, res) => {
             return res.status(403).json({ error: 'Your account has been banned' });
         }
 
-        const valid = user.comparePassword(password);
+        const valid = await user.comparePassword(password);
         if (!valid) {
             return res.status(401).json({ error: 'Invalid credentials' });
         }
@@ -120,15 +136,59 @@ router.post('/forgot-password', async (req, res) => {
         }
 
         const user = await User.findOne({ email });
-        if (!user) {
-            return res.status(404).json({ error: 'No account found with that email' });
+        if (user && resend) {
+            const token = user.createResetToken();
+            await user.save({ validateBeforeSave: false });
+
+            const resetUrl = `${APP_URL}/reset-password?token=${token}`;
+            await resend.emails.send({
+                from: 'CodeMesh <noreply@codemesh.org>',
+                to: user.email,
+                subject: 'Reset your CodeMesh password',
+                html: `
+                    <p>You requested a password reset for your CodeMesh account.</p>
+                    <p><a href="${resetUrl}" style="color:#6C5CE7;">Reset password</a></p>
+                    <p>This link expires in 1 hour. If you didn't request this, ignore this email.</p>
+                `
+            });
         }
 
-        const password = user.getPassword();
-        res.json({ message: 'Password recovered', password });
+        res.json({ message: 'If an account exists, a reset link has been sent' });
     } catch (err) {
         console.error('Forgot password error:', err);
         res.status(500).json({ error: 'Password recovery failed' });
+    }
+});
+
+// POST /api/auth/reset-password
+router.post('/reset-password', async (req, res) => {
+    try {
+        const { token, newPassword } = req.body;
+
+        if (!token || !newPassword) {
+            return res.status(400).json({ error: 'Token and new password are required' });
+        }
+        if (newPassword.length < 6) {
+            return res.status(400).json({ error: 'Password must be at least 6 characters' });
+        }
+
+        const user = await User.findOne({
+            resetToken: token,
+            resetTokenExpiry: { $gt: new Date() }
+        });
+
+        if (!user) {
+            return res.status(400).json({ error: 'Invalid or expired reset link' });
+        }
+
+        user.passwordHash = newPassword;
+        user.clearResetToken();
+        await user.save();
+
+        res.json({ message: 'Password reset successfully. You can now sign in.' });
+    } catch (err) {
+        console.error('Reset password error:', err);
+        res.status(500).json({ error: 'Password reset failed' });
     }
 });
 

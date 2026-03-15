@@ -1,8 +1,11 @@
 const express = require('express');
+const jwt = require('jsonwebtoken');
 const { v4: uuidv4 } = require('uuid');
 const Session = require('../models/Session');
 const User = require('../models/User');
 const authMiddleware = require('../middleware/auth');
+
+const JWT_SECRET = process.env.JWT_SECRET || 'fallback_secret';
 
 const router = express.Router();
 
@@ -67,7 +70,7 @@ router.get('/', authMiddleware, async (req, res) => {
     }
 });
 
-// GET /api/sessions/:id — get session by sessionId
+// GET /api/sessions/:id — get session by sessionId (auth required unless public)
 router.get('/:id', async (req, res) => {
     try {
         const session = await Session.findOne({ sessionId: req.params.id })
@@ -76,6 +79,25 @@ router.get('/:id', async (req, res) => {
 
         if (!session) {
             return res.status(404).json({ error: 'Session not found' });
+        }
+
+        const authHeader = req.headers.authorization;
+        const hasAuth = authHeader && authHeader.startsWith('Bearer ');
+        let userId = null;
+        if (hasAuth) {
+            try {
+                const decoded = jwt.verify(authHeader.split(' ')[1], JWT_SECRET);
+                userId = decoded.id;
+            } catch (e) { /* invalid token */ }
+        }
+
+        const isOwner = userId && session.owner._id.toString() === userId;
+        const isCollab = userId && session.collaborators.some(c => c.user && c.user._id.toString() === userId);
+        if (!session.isPublic && !isOwner && !isCollab) {
+            if (!userId) {
+                return res.status(401).json({ error: 'Authentication required' });
+            }
+            return res.status(403).json({ error: 'You do not have access to this session' });
         }
 
         res.json(session);
