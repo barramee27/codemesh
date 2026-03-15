@@ -1307,9 +1307,28 @@
     }
 
     // ─── Integrated Terminal ───
-    function initTerminal() {
+    async function initTerminal() {
         const container = document.getElementById('terminal-container');
         if (!container || state.terminal) return;
+        
+        // Check if terminal is enabled
+        try {
+            const status = await api('/terminal/status');
+            if (!status.enabled) {
+                container.innerHTML = '<div class="problems-placeholder">' +
+                    '<i class="codicon codicon-terminal" style="font-size: 48px; opacity: 0.3; margin-bottom: 12px;"></i>' +
+                    '<p>Terminal Disabled</p>' +
+                    '<p style="font-size: 12px; color: var(--vscode-descriptionForeground);">' +
+                    'Terminal is disabled for security in production.<br>' +
+                    'Set ENABLE_TERMINAL=true to enable (not recommended for public deployments).</p>' +
+                    '</div>';
+                return;
+            }
+        } catch (err) {
+            container.innerHTML = '<div class="problems-placeholder">Failed to check terminal status.</div>';
+            return;
+        }
+        
         if (typeof Terminal === 'undefined') {
             container.innerHTML = '<div class="problems-placeholder">Terminal requires xterm.js. Refresh the page.</div>';
             return;
@@ -1318,7 +1337,7 @@
         const term = new Terminal({ cursorBlink: true, theme: { background: '#1e1e1e', foreground: '#d4d4d4' } });
         term.open(container);
         term.writeln('CodeMesh Terminal (type a command and press Enter)');
-        term.writeln('Allowed: node, python3, python, npm, npx, ls, pwd, echo, cat, clear, whoami, date');
+        term.writeln('Allowed: node, python3, python, ls, pwd, echo, clear, whoami, date');
         term.write('\r\n$ ');
         let currentLine = '';
         term.onData((data) => {

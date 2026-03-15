@@ -43,7 +43,11 @@ Create a `.env` file (optional):
 PORT=3000
 MONGODB_URI=mongodb://localhost:27017/codemesh
 JWT_SECRET=your-secret-key
+NODE_ENV=production
+ENABLE_TERMINAL=false  # Set to true to enable terminal (NOT recommended for production)
 ```
+
+**Security Note**: The integrated terminal is **disabled by default in production** for security. Only enable it (`ENABLE_TERMINAL=true`) if you understand the risks and trust your users. The terminal has a restricted command whitelist and input sanitization, but command execution on the server should be avoided in public deployments.
 
 ### Run
 
