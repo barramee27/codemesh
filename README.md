@@ -49,6 +49,12 @@ ENABLE_TERMINAL=false  # Set to true to enable terminal (NOT recommended for pro
 
 **Security Note**: The integrated terminal is **disabled by default in production** for security. Only enable it (`ENABLE_TERMINAL=true`) if you understand the risks and trust your users. The terminal has a restricted command whitelist and input sanitization, but command execution on the server should be avoided in public deployments.
 
+**Why harden the terminal if the code is open source?**  
+Open source means anyone can read the code—it does *not* mean the app is safe to run. If the terminal runs commands on your server, anyone using the app (even without reading the code) can run commands on *your* Railway/server. Hardening limits what they can do.
+
+**What does the 5-second timeout mean?**  
+If a command runs longer than 5 seconds, it is stopped. This prevents long-running or infinite loops from blocking the server.
+
 ### Run
 
 ```bash

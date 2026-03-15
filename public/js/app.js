@@ -1330,7 +1330,16 @@
         }
         
         if (typeof Terminal === 'undefined') {
-            container.innerHTML = '<div class="problems-placeholder">Terminal requires xterm.js. Refresh the page.</div>';
+            container.innerHTML = '<div class="problems-placeholder">Loading xterm.js...</div>';
+            const link = document.createElement('link');
+            link.rel = 'stylesheet';
+            link.href = 'https://cdnjs.cloudflare.com/ajax/libs/xterm/5.5.0/xterm.min.css';
+            document.head.appendChild(link);
+            const script = document.createElement('script');
+            script.src = 'https://cdnjs.cloudflare.com/ajax/libs/xterm/5.5.0/xterm.js';
+            script.onload = () => { state.terminal = null; initTerminal(); };
+            script.onerror = () => container.innerHTML = '<div class="problems-placeholder">Failed to load xterm.js. Check your connection or try again.</div>';
+            document.head.appendChild(script);
             return;
         }
         container.innerHTML = '';
