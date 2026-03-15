@@ -31,6 +31,7 @@ const io = new Server(server, {
 });
 
 // ─── Middleware ───
+app.set('trust proxy', 1);  // Required for rate limit behind Railway/nginx
 app.use(compression());  // Gzip all HTTP responses
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));

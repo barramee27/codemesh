@@ -371,7 +371,7 @@
         if (monacoLoadingPromise) return monacoLoadingPromise;
         
         monacoLoadingPromise = new Promise((resolve) => {
-            if (window.monaco) {
+            if (window.monaco && window.monaco.editor) {
                 monacoLoaded = true;
                 resolve();
                 return;
@@ -1601,12 +1601,13 @@
         });
 
         // ─── Comment Events ───
-        document.getElementById('close-comments-btn').addEventListener('click', () => {
-            document.getElementById('comments-sidebar').style.display = 'none';
+        document.getElementById('close-comments-btn')?.addEventListener('click', () => {
+            const sb = document.getElementById('comments-sidebar');
+            if (sb) sb.style.display = 'none';
             state.activeCommentLine = null;
         });
 
-        document.getElementById('submit-comment-btn').addEventListener('click', () => {
+        document.getElementById('submit-comment-btn')?.addEventListener('click', () => {
             const input = document.getElementById('new-comment-input');
             const text = input.value.trim();
             if (text && state.activeCommentLine !== null && state.socket && state.activeFileId) {
@@ -1620,7 +1621,7 @@
             }
         });
 
-        document.getElementById('new-comment-input').addEventListener('keydown', (e) => {
+        document.getElementById('new-comment-input')?.addEventListener('keydown', (e) => {
             if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault();
                 document.getElementById('submit-comment-btn').click();
