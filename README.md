@@ -7,11 +7,17 @@
 ## Features
 
 - **Real-time collaboration** — Multiple users editing the same code with live sync
-- **Multi-language support** — JavaScript, Python, TypeScript, HTML, CSS, Java, C++, and more
-- **Code execution** — Run Python, JavaScript, and other languages directly
-- **HTML preview** — Live preview of HTML in a dedicated window
+- **VS Code-like UI** — Familiar interface with menubar, activity bar, sidebar, and panels
+- **Monaco Editor** — Full-featured code editor with syntax highlighting, IntelliSense, and more
+- **Multi-language support** — JavaScript, Python, TypeScript, HTML, CSS, Java, C++, Go, Rust, PHP, Ruby, and more
+- **Code execution** — Run code directly in the editor with output panel
+- **Integrated terminal** — Built-in terminal for running commands (node, python, npm, etc.)
+- **HTML preview** — Live preview of HTML in a dedicated panel
+- **Multi-file support** — Create and manage multiple files in a session
 - **Session management** — Create, join, and share coding sessions
 - **Role-based access** — Owner, Editor, and Viewer roles
+- **Split editor** — View the same file side-by-side
+- **Comments** — Add line comments for collaboration
 
 ## Quick Start
 
@@ -49,14 +55,22 @@ Open [http://localhost:3000](http://localhost:3000)
 
 ## Supported Languages
 
-| Language   | Execution | Preview |
-|-----------|-----------|---------|
-| JavaScript | ✅ | - |
-| Python     | ✅ | - |
-| TypeScript | ✅ | - |
-| HTML       | - | ✅ Live preview |
-| CSS        | - | - |
-| Java, C++, Go, Rust, PHP, Ruby | ✅ | - |
+| Language   | Execution | Preview | Editor Support |
+|-----------|-----------|---------|---------------|
+| JavaScript | ✅ | - | ✅ |
+| Python     | ✅ | - | ✅ |
+| TypeScript | ✅ | - | ✅ |
+| HTML       | - | ✅ Live preview | ✅ |
+| CSS        | - | - | ✅ |
+| Java       | ✅ | - | ✅ |
+| C++        | ✅ | - | ✅ |
+| C#         | ✅ | - | ✅ |
+| Go         | ✅ | - | ✅ |
+| Rust       | ✅ | - | ✅ |
+| PHP        | ✅ | - | ✅ |
+| Ruby       | ✅ | - | ✅ |
+| SQL        | - | - | ✅ |
+| Markdown   | - | - | ✅ |
 
 ## Project Structure
 
@@ -64,12 +78,22 @@ Open [http://localhost:3000](http://localhost:3000)
 codemesh/
 ├── middleware/    # Auth, admin middleware
 ├── models/        # User, Session models
-├── routes/        # API routes (auth, sessions, run)
+├── routes/        # API routes (auth, sessions, run, terminal)
 ├── sockets/       # WebSocket collaboration
 ├── public/        # Frontend (HTML, CSS, JS)
-├── utils/         # Utilities
+│   ├── css/       # VS Code-style CSS
+│   ├── js/        # Main app logic
+│   └── index.html # Single-page app
+├── utils/         # Utilities (OT algorithms)
 └── server.js      # Entry point
 ```
+
+## Tech Stack
+
+- **Backend**: Node.js, Express, Socket.IO, MongoDB
+- **Frontend**: Vanilla JavaScript, Monaco Editor, xterm.js
+- **Real-time**: Operational Transform (OT) for conflict-free editing
+- **Authentication**: JWT-based auth with guest support
 
 ## License
 

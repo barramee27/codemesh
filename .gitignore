@@ -1,2 +1,5 @@
 node_modules/
 .env
+.cursor/
+*.log
+.DS_Store
