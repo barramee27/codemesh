@@ -135,22 +135,35 @@ router.post('/forgot-password', async (req, res) => {
             return res.status(400).json({ error: 'Email is required' });
         }
 
+        if (!resend) {
+            console.error('Forgot password: RESEND_API_KEY not configured');
+            return res.status(500).json({ error: 'Email service not configured. Please contact support.' });
+        }
+
         const user = await User.findOne({ email });
-        if (user && resend) {
+        if (user) {
             const token = user.createResetToken();
             await user.save({ validateBeforeSave: false });
 
             const resetUrl = `${APP_URL}/reset-password?token=${token}`;
-            await resend.emails.send({
-                from: 'CodeMesh <noreply@codemesh.org>',
-                to: user.email,
-                subject: 'Reset your CodeMesh password',
-                html: `
-                    <p>You requested a password reset for your CodeMesh account.</p>
-                    <p><a href="${resetUrl}" style="color:#6C5CE7;">Reset password</a></p>
-                    <p>This link expires in 1 hour. If you didn't request this, ignore this email.</p>
-                `
-            });
+            try {
+                await resend.emails.send({
+                    from: 'CodeMesh <noreply@codemesh.org>',
+                    to: user.email,
+                    subject: 'Reset your CodeMesh password',
+                    html: `
+                        <p>You requested a password reset for your CodeMesh account.</p>
+                        <p><a href="${resetUrl}" style="color:#6C5CE7;">Reset password</a></p>
+                        <p>This link expires in 1 hour. If you didn't request this, ignore this email.</p>
+                    `
+                });
+            } catch (emailErr) {
+                console.error('Failed to send reset email:', emailErr);
+                // Clear the token since email failed
+                user.clearResetToken();
+                await user.save({ validateBeforeSave: false });
+                return res.status(500).json({ error: 'Failed to send reset email. Please try again later.' });
+            }
         }
 
         res.json({ message: 'If an account exists, a reset link has been sent' });
@@ -181,7 +194,9 @@ router.post('/reset-password', async (req, res) => {
             return res.status(400).json({ error: 'Invalid or expired reset link' });
         }
 
+        // Set password - pre-save hook will hash it
         user.passwordHash = newPassword;
+        user.markModified('passwordHash'); // Ensure Mongoose detects the change
         user.clearResetToken();
         await user.save();
 
