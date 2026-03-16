@@ -110,3 +110,9 @@ codemesh/
 ## License
 
 MIT © [barramee27](https://github.com/barramee27)
+
+## Links
+
+- **Live:** [codemesh.org](https://codemesh.org)
+- **X (Twitter):** [@Barramee_code](https://x.com/Barramee_code)
+- **GitHub:** [barramee27](https://github.com/barramee27)
