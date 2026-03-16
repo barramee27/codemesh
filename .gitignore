@@ -5,3 +5,4 @@ node_modules/
 *.har
 .DS_Store
 portfolio-v1/
+uploads/

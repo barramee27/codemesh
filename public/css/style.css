@@ -1944,6 +1944,18 @@ select.input-full {
   gap: 8px;
 }
 
+.admin-upload-area {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.admin-upload-hint {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
 .btn-ban,
 .btn-unban,
 .btn-delete {

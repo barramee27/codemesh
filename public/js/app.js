@@ -35,8 +35,9 @@
     const API_BASE = '/api';
 
     async function api(endpoint, options = {}) {
-        const headers = { 'Content-Type': 'application/json' };
+        const headers = {};
         if (state.token) headers['Authorization'] = `Bearer ${state.token}`;
+        if (!(options.body instanceof FormData)) headers['Content-Type'] = 'application/json';
 
         const res = await fetch(`${API_BASE}${endpoint}`, {
             ...options,
@@ -1909,15 +1910,28 @@
                 const target = tab.dataset.adminTab;
                 const usersPanel = document.getElementById('admin-users-panel');
                 const sessionsPanel = document.getElementById('admin-sessions-panel');
+                const filesPanel = document.getElementById('admin-files-panel');
                 if (usersPanel) usersPanel.style.display = target === 'users' ? '' : 'none';
                 if (sessionsPanel) sessionsPanel.style.display = target === 'sessions' ? '' : 'none';
+                if (filesPanel) {
+                    filesPanel.style.display = target === 'files' ? '' : 'none';
+                    if (target === 'files') loadAdminFiles();
+                }
             });
+        });
+
+        document.getElementById('admin-upload-btn')?.addEventListener('click', () => document.getElementById('admin-file-input')?.click());
+        document.getElementById('admin-file-input')?.addEventListener('change', handleAdminFileUpload);
+
+        document.getElementById('admin-files-panel')?.addEventListener('click', (e) => {
+            const btn = e.target.closest('.admin-delete-file');
+            if (btn && btn.dataset.filename) window._adminDeleteFile(btn.dataset.filename);
         });
     }
 
     async function loadAdminPanel() {
         showView('admin');
-        await Promise.all([loadAdminUsers(), loadAdminSessions()]);
+        await Promise.all([loadAdminUsers(), loadAdminSessions(), loadAdminFiles()]);
     }
 
     async function loadAdminUsers() {
@@ -2017,6 +2031,62 @@
             const result = await api(`/admin/sessions/${sessionId}`, { method: 'DELETE' });
             showToast(result.message, 'success');
             loadAdminSessions();
+        } catch (err) {
+            showToast(err.message, 'error');
+        }
+    };
+
+    async function loadAdminFiles() {
+        try {
+            const files = await api('/admin/files');
+            document.getElementById('admin-file-count').textContent = `${files.length} files`;
+
+            const tbody = document.getElementById('admin-files-tbody');
+            const formatSize = (bytes) => bytes < 1024 ? bytes + ' B' : (bytes / 1024).toFixed(1) + ' KB';
+            tbody.innerHTML = files.length === 0
+                ? '<tr><td colspan="4" style="color:var(--text-muted);text-align:center;padding:24px;">No files yet. Upload one above.</td></tr>'
+                : files.map(f => `
+                    <tr>
+                        <td><a href="/uploads/${encodeURIComponent(f.name)}" target="_blank" rel="noopener">${escapeHtml(f.name)}</a></td>
+                        <td>${formatSize(f.size)}</td>
+                        <td>${timeAgo(f.uploadedAt)}</td>
+                        <td>
+                            <div class="admin-actions">
+                                <a href="/uploads/${encodeURIComponent(f.name)}" target="_blank" rel="noopener" class="btn btn-secondary btn-sm">Open</a>
+                                <button class="btn-delete admin-delete-file" data-filename="${escapeHtml(f.name)}">Delete</button>
+                            </div>
+                        </td>
+                    </tr>
+                `).join('');
+        } catch (err) {
+            showToast('Failed to load files: ' + err.message, 'error');
+        }
+    }
+
+    async function handleAdminFileUpload(e) {
+        const input = e.target;
+        const files = input.files;
+        if (!files || files.length === 0) return;
+        for (let i = 0; i < files.length; i++) {
+            const formData = new FormData();
+            formData.append('file', files[i]);
+            try {
+                await api('/admin/files', { method: 'POST', body: formData });
+                showToast(`Uploaded: ${files[i].name}`, 'success');
+            } catch (err) {
+                showToast(`Upload failed: ${err.message}`, 'error');
+            }
+        }
+        input.value = '';
+        loadAdminFiles();
+    }
+
+    window._adminDeleteFile = async function (fileId) {
+        if (!confirm('Delete this file?')) return;
+        try {
+            const result = await api(`/admin/files/${encodeURIComponent(fileId)}`, { method: 'DELETE' });
+            showToast(result.message, 'success');
+            loadAdminFiles();
         } catch (err) {
             showToast(err.message, 'error');
         }

@@ -683,6 +683,7 @@
       <div class="admin-tabs">
         <button class="admin-tab active" data-admin-tab="users" id="admin-tab-users">👥 Users</button>
         <button class="admin-tab" data-admin-tab="sessions" id="admin-tab-sessions">📄 Sessions</button>
+        <button class="admin-tab" data-admin-tab="files" id="admin-tab-files">📁 Files</button>
       </div>
 
       <!-- Users Panel -->
@@ -730,6 +731,39 @@
               </tr>
             </thead>
             <tbody id="admin-sessions-tbody">
+              <!-- Populated by JS -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Files Panel -->
+      <div id="admin-files-panel" class="admin-panel" style="display:none;">
+        <div class="admin-panel-header">
+          <h3>File Uploader</h3>
+          <span class="admin-count" id="admin-file-count">0 files</span>
+        </div>
+        <div class="admin-upload-area">
+          <input type="file" id="admin-file-input" multiple style="display:none;">
+          <button type="button" class="btn btn-primary" id="admin-upload-btn">
+            <svg viewBox="0 0 20 20" fill="currentColor" width="18" height="18">
+              <path fill-rule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zM6.293 6.707a1 1 0 010-1.414l3-3a1 1 0 011.414 0l3 3a1 1 0 01-1.414 1.414L11 5.414V13a1 1 0 11-2 0V5.414L7.707 6.707a1 1 0 01-1.414 0z" clip-rule="evenodd"/>
+            </svg>
+            Upload files
+          </button>
+          <span class="admin-upload-hint">Max 10MB per file. Blocked: .exe, .bat, .sh, .ps1</span>
+        </div>
+        <div class="admin-table-wrap" style="margin-top:16px;">
+          <table class="admin-table">
+            <thead>
+              <tr>
+                <th>Filename</th>
+                <th>Size</th>
+                <th>Uploaded</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="admin-files-tbody">
               <!-- Populated by JS -->
             </tbody>
           </table>

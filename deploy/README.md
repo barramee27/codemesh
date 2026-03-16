@@ -63,9 +63,22 @@ In Resend dashboard: add codemesh.org, add DNS records (SPF, DKIM), verify.
 
 ## Updates
 
+From your machine (after pushing to GitHub):
+
+```bash
+./deploy-codemesh.sh
+# or: ./deploy-codemesh.sh 72.61.151.199
+```
+
+Or manually on VPS:
+
 ```bash
 cd /var/www/codemesh
 git pull
 npm install --production
 pm2 restart codemesh
 ```
+
+## Admin File Uploader
+
+Uploads are stored in `uploads/` (created automatically). Ensure the app has write permission. Files are served at `https://codemesh.org/uploads/<filename>`.

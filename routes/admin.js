@@ -1,4 +1,7 @@
 const express = require('express');
+const path = require('path');
+const fs = require('fs');
+const multer = require('multer');
 const User = require('../models/User');
 const Session = require('../models/Session');
 const authMiddleware = require('../middleware/auth');
@@ -8,6 +11,70 @@ const router = express.Router();
 
 // All admin routes require auth + admin role
 router.use(authMiddleware, adminAuth);
+
+// ─── File uploads ───
+const UPLOADS_DIR = path.join(__dirname, '..', 'uploads');
+if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+
+const storage = multer.diskStorage({
+    destination: (req, file, cb) => cb(null, UPLOADS_DIR),
+    filename: (req, file, cb) => {
+        const safeName = Buffer.from(file.originalname, 'latin1').toString('utf8').replace(/[^a-zA-Z0-9._-]/g, '_');
+        const unique = Date.now() + '-' + Math.random().toString(36).slice(2, 9);
+        cb(null, unique + '-' + safeName);
+    }
+});
+
+const upload = multer({
+    storage,
+    limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
+    fileFilter: (req, file, cb) => {
+        const blocked = /\.(exe|bat|cmd|sh|ps1|dll|so)$/i.test(file.originalname);
+        if (blocked) return cb(new Error('File type not allowed'));
+        cb(null, true);
+    }
+});
+
+// GET /api/admin/files — list uploaded files
+router.get('/files', (req, res) => {
+    try {
+        const files = fs.readdirSync(UPLOADS_DIR)
+            .filter(f => fs.statSync(path.join(UPLOADS_DIR, f)).isFile())
+            .map(name => {
+                const stat = fs.statSync(path.join(UPLOADS_DIR, name));
+                return { name, size: stat.size, uploadedAt: stat.mtime };
+            })
+            .sort((a, b) => new Date(b.uploadedAt) - new Date(a.uploadedAt));
+        res.json(files);
+    } catch (err) {
+        console.error('Admin list files error:', err);
+        res.status(500).json({ error: 'Failed to list files' });
+    }
+});
+
+// POST /api/admin/files — upload file
+router.post('/files', upload.single('file'), (req, res) => {
+    if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+    res.json({
+        message: 'File uploaded',
+        file: { name: req.file.filename, size: req.file.size, url: `/uploads/${req.file.filename}` }
+    });
+});
+
+// DELETE /api/admin/files/:name — delete file
+router.delete('/files/:name', (req, res) => {
+    try {
+        const name = path.basename(req.params.name);
+        if (!name || name.includes('..')) return res.status(400).json({ error: 'Invalid filename' });
+        const filePath = path.join(UPLOADS_DIR, name);
+        if (!fs.existsSync(filePath)) return res.status(404).json({ error: 'File not found' });
+        fs.unlinkSync(filePath);
+        res.json({ message: `File "${name}" deleted` });
+    } catch (err) {
+        console.error('Admin delete file error:', err);
+        res.status(500).json({ error: 'Failed to delete file' });
+    }
+});
 
 // GET /api/admin/users — list all users
 router.get('/users', async (req, res) => {

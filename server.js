@@ -50,6 +50,9 @@ app.use(express.static(path.join(__dirname, 'public'), {
     etag: true
 }));
 
+// Admin uploads (publicly readable at /uploads/)
+app.use('/uploads', express.static(path.join(__dirname, 'uploads'), { etag: true }));
+
 // ─── Rate limiting on API routes ───
 const apiLimiter = rateLimit({
     windowMs: 60 * 1000,   // 1 minute window
