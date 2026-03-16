@@ -1,0 +1,54 @@
+/* Multiplayer Browser - Cursor & annotation overlay */
+#mpb-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 2147483646;
+}
+
+.mpb-cursor {
+  position: fixed;
+  width: 20px;
+  height: 20px;
+  margin-left: -2px;
+  margin-top: -2px;
+  pointer-events: none;
+  transition: transform 0.05s ease-out;
+  z-index: 2147483647;
+}
+
+.mpb-cursor-svg {
+  width: 100%;
+  height: 100%;
+  filter: drop-shadow(0 1px 2px rgba(0,0,0,0.5));
+}
+
+.mpb-cursor-label {
+  position: absolute;
+  left: 22px;
+  top: -2px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font: 11px system-ui, sans-serif;
+  white-space: nowrap;
+  color: #fff;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.5);
+  max-width: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mpb-annotation {
+  position: absolute;
+  border-radius: 4px;
+  pointer-events: none;
+  opacity: 0.4;
+  mix-blend-mode: multiply;
+}
+
+.mpb-annotation:hover {
+  opacity: 0.6;
+}
