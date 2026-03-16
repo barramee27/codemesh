@@ -44,6 +44,16 @@ const allowedOrigins = process.env.ALLOWED_ORIGINS
 app.use(cors({ origin: allowedOrigins }));
 app.use(express.json({ limit: '10mb' }));
 
+// index.html + app.js: no-cache so deploys are visible immediately (avoids blank/stale admin panels)
+app.get(['/', '/index.html'], (req, res) => {
+    res.set('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
+app.get('/js/app.js', (req, res) => {
+    res.set('Cache-Control', 'no-cache, must-revalidate');
+    res.sendFile(path.join(__dirname, 'public', 'js', 'app.js'));
+});
+
 // Static files with cache headers (1 day for assets)
 app.use(express.static(path.join(__dirname, 'public'), {
     maxAge: process.env.NODE_ENV === 'production' ? '1d' : 0,
@@ -70,9 +80,10 @@ app.use('/api/run', runRoutes);
 app.use('/api/terminal', terminalRoutes);
 app.use('/api/admin', adminRoutes);
 
-// SPA fallback
+// SPA fallback (no-cache so deploys are visible immediately)
 app.get('*', (req, res) => {
-    if (!req.path.startsWith('/api')) {
+    if (!req.path.startsWith('/api') && !req.path.startsWith('/uploads')) {
+        res.set('Cache-Control', 'no-cache, no-store, must-revalidate');
         res.sendFile(path.join(__dirname, 'public', 'index.html'));
     }
 });

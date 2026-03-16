@@ -2037,12 +2037,13 @@
     };
 
     async function loadAdminFiles() {
+        const countEl = document.getElementById('admin-file-count');
+        const tbody = document.getElementById('admin-files-tbody');
+        if (!tbody) return;
+        const formatSize = (bytes) => bytes < 1024 ? bytes + ' B' : (bytes / 1024).toFixed(1) + ' KB';
         try {
             const files = await api('/admin/files');
-            document.getElementById('admin-file-count').textContent = `${files.length} files`;
-
-            const tbody = document.getElementById('admin-files-tbody');
-            const formatSize = (bytes) => bytes < 1024 ? bytes + ' B' : (bytes / 1024).toFixed(1) + ' KB';
+            if (countEl) countEl.textContent = `${files.length} files`;
             tbody.innerHTML = files.length === 0
                 ? '<tr><td colspan="4" style="color:var(--text-muted);text-align:center;padding:24px;">No files yet. Upload one above.</td></tr>'
                 : files.map(f => `
@@ -2060,6 +2061,8 @@
                 `).join('');
         } catch (err) {
             showToast('Failed to load files: ' + err.message, 'error');
+            if (countEl) countEl.textContent = '—';
+            tbody.innerHTML = '<tr><td colspan="4" style="color:var(--text-muted);text-align:center;padding:24px;">Could not load files. You can still upload above.</td></tr>';
         }
     }
 
