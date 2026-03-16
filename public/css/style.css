@@ -1675,6 +1675,65 @@ select.input-full {
 .extensions-panel {
   padding: 16px;
 }
+
+.chat-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 200px;
+}
+.chat-panel .chat-header {
+  padding: 8px 12px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  color: var(--vscode-sideBarTitle-foreground);
+  border-bottom: 1px solid var(--vscode-sideBar-border);
+}
+.chat-panel .chat-messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.chat-panel .chat-message {
+  font-size: 12px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: var(--vscode-input-background);
+  word-break: break-word;
+}
+.chat-panel .chat-message .chat-username {
+  font-weight: 600;
+  font-size: 11px;
+  margin-bottom: 2px;
+  color: var(--vscode-textLink-foreground);
+}
+.chat-panel .chat-message .chat-text {
+  color: var(--vscode-foreground);
+}
+.chat-panel .chat-input-area {
+  display: flex;
+  gap: 8px;
+  padding: 8px;
+  border-top: 1px solid var(--vscode-sideBar-border);
+}
+.chat-panel .chat-input-area input {
+  flex: 1;
+  padding: 6px 10px;
+  font-size: 12px;
+  border: 1px solid var(--vscode-input-border);
+  background: var(--vscode-input-background);
+  color: var(--vscode-input-foreground);
+  border-radius: 4px;
+  outline: none;
+}
+.chat-panel .chat-input-area input:focus {
+  border-color: var(--vscode-focusBorder);
+}
+
 .extensions-placeholder {
   display: flex;
   flex-direction: column;

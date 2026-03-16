@@ -22,7 +22,8 @@ function getOrCreateSessionState(sessionId) {
             files: new Map(), // fileId -> { doc, version, history }
             users: new Map(), // socketId -> { username, color, cursor, selection, userId, role, activeFileId }
             language: 'javascript', // Default fallback
-            comments: [] // { id, fileId, line, text, author, timestamp }
+            comments: [], // { id, fileId, line, text, author, timestamp }
+            chatMessages: [] // { id, userId, username, text, ts }
         });
     }
     return activeSessions.get(sessionId);
@@ -264,7 +265,8 @@ module.exports = function setupCollaboration(io) {
                 files: clientFiles,
                 users: Object.fromEntries(state.users),
                 role: userRole,
-                comments: state.comments
+                comments: state.comments,
+                chatMessages: state.chatMessages || []
             });
 
             // Notify others
@@ -513,6 +515,25 @@ module.exports = function setupCollaboration(io) {
             }
         });
 
+        socket.on('chat-message', (data) => {
+            const { sessionId, text } = data;
+            if (!sessionId || !text || typeof text !== 'string') return;
+            const state = activeSessions.get(sessionId);
+            if (!state) return;
+            const userInfo = state.users.get(socket.id);
+            const msg = {
+                id: require('crypto').randomBytes(8).toString('hex'),
+                userId: socket.user?.id || socket.id,
+                username: userInfo?.username || socket.user?.username || 'Anonymous',
+                text: text.trim().slice(0, 2000),
+                ts: Date.now()
+            };
+            state.chatMessages = state.chatMessages || [];
+            state.chatMessages.push(msg);
+            if (state.chatMessages.length > 200) state.chatMessages = state.chatMessages.slice(-100);
+            io.to(sessionId).emit('chat-message', msg);
+        });
+
         socket.on('request-state', (data) => {
             const { sessionId } = data;
             if (!sessionId || socket.sessionId !== sessionId) return;
@@ -534,7 +555,8 @@ module.exports = function setupCollaboration(io) {
                 files: clientFiles,
                 users: Object.fromEntries(state.users),
                 role: userInfo.role,
-                comments: state.comments
+                comments: state.comments,
+                chatMessages: state.chatMessages || []
             });
         });
 

@@ -21,6 +21,7 @@
         users: new Map(),
         userRole: 'editor', // 'owner' | 'editor' | 'viewer'
         comments: [],
+        chatMessages: [],
         remoteCursors: new Map(), // track remote selections
         files: new Map(), // Map of fileId -> { id, name, doc, language, version }
         activeFileId: null,
@@ -832,6 +833,9 @@
             if (data.comments) {
                 state.comments = data.comments;
             }
+            if (Array.isArray(data.chatMessages)) {
+                state.chatMessages = data.chatMessages;
+            }
 
             const container = document.getElementById('editor-container');
             container.innerHTML = '';
@@ -881,6 +885,14 @@
             setSaveStatus('saved');
             renderFileTree();
             renderTabs();
+            renderChatMessages();
+        });
+
+        state.socket.on('chat-message', (msg) => {
+            state.chatMessages = state.chatMessages || [];
+            state.chatMessages.push(msg);
+            if (state.chatMessages.length > 200) state.chatMessages = state.chatMessages.slice(-100);
+            renderChatMessages();
         });
 
         state.socket.on('file-created', (fileData) => {
@@ -1358,6 +1370,28 @@
         });
     }
 
+    function renderChatMessages() {
+        const el = document.getElementById('chat-messages');
+        if (!el) return;
+        el.innerHTML = '';
+        (state.chatMessages || []).forEach(msg => {
+            const div = document.createElement('div');
+            div.className = 'chat-message';
+            div.innerHTML = `<div class="chat-username">${escapeHtml(msg.username || 'Anonymous')}</div><div class="chat-text">${escapeHtml(msg.text)}</div>`;
+            el.appendChild(div);
+        });
+        el.scrollTop = el.scrollHeight;
+    }
+
+    function sendChatMessage() {
+        const input = document.getElementById('chat-input');
+        if (!input || !state.socket || !state.currentSession) return;
+        const text = input.value.trim();
+        if (!text) return;
+        state.socket.emit('chat-message', { sessionId: state.currentSession, text });
+        input.value = '';
+    }
+
     // ─── Role Badge ───
     function updateRoleBadge(role) {
         const badge = document.getElementById('user-role-badge');
@@ -1523,6 +1557,12 @@
             manualSave();
         });
 
+        // ─── Chat ───
+        document.getElementById('chat-send-btn')?.addEventListener('click', sendChatMessage);
+        document.getElementById('chat-input')?.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') { e.preventDefault(); sendChatMessage(); }
+        });
+
         // ─── Run Code ───
         document.getElementById('run-code-btn')?.addEventListener('click', runCode);
 
@@ -1587,16 +1627,20 @@
                     if (sidebar) sidebar.style.display = '';
                     const tree = document.getElementById('file-tree');
                     const extPanel = document.getElementById('extensions-panel');
+                    const chatPanel = document.getElementById('chat-panel');
                     if (tree) tree.style.display = '';
                     if (extPanel) extPanel.style.display = 'none';
+                    if (chatPanel) chatPanel.style.display = 'none';
                 }
                 else if (act === 'search') { state.editorView?.focus(); state.editorView?.trigger('toggleFind', 'actions.find'); }
                 else if (act === 'source-control') {
                     if (sidebar) sidebar.style.display = '';
                     const tree = document.getElementById('file-tree');
                     const extPanel = document.getElementById('extensions-panel');
+                    const chatPanel = document.getElementById('chat-panel');
                     if (tree) tree.style.display = '';
                     if (extPanel) extPanel.style.display = 'none';
+                    if (chatPanel) chatPanel.style.display = 'none';
                     showToast('Source control: CodeMesh syncs automatically.', 'info');
                 }
                 else if (act === 'run') runCode();
@@ -1604,8 +1648,20 @@
                     if (sidebar) sidebar.style.display = '';
                     const tree = document.getElementById('file-tree');
                     const extPanel = document.getElementById('extensions-panel');
+                    const chatPanel = document.getElementById('chat-panel');
                     if (tree) tree.style.display = 'none';
                     if (extPanel) extPanel.style.display = 'block';
+                    if (chatPanel) chatPanel.style.display = 'none';
+                }
+                else if (act === 'chat') {
+                    if (sidebar) sidebar.style.display = '';
+                    const tree = document.getElementById('file-tree');
+                    const extPanel = document.getElementById('extensions-panel');
+                    const chatPanel = document.getElementById('chat-panel');
+                    if (tree) tree.style.display = 'none';
+                    if (extPanel) extPanel.style.display = 'none';
+                    if (chatPanel) chatPanel.style.display = 'flex';
+                    renderChatMessages();
                 }
             });
         });
