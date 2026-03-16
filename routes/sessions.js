@@ -190,7 +190,31 @@ router.delete('/:id', authMiddleware, async (req, res) => {
             return res.status(403).json({ error: 'Only the owner or admin can delete this session' });
         }
 
+        const ownerId = session.owner;
         await Session.deleteOne({ _id: session._id });
+        
+        // Check if owner was a guest and delete account if no sessions remain
+        if (ownerId) {
+            try {
+                const User = require('../models/User');
+                const user = await User.findById(ownerId);
+                if (user && user.email && user.email.endsWith('@guest.codemesh.local')) {
+                    const remainingSessions = await Session.find({ owner: ownerId });
+                    if (remainingSessions.length === 0) {
+                        // Remove from collaborators in other sessions
+                        await Session.updateMany(
+                            { 'collaborators.user': ownerId },
+                            { $pull: { collaborators: { user: ownerId } } }
+                        );
+                        await User.deleteOne({ _id: ownerId });
+                        console.log(`Deleted guest account after session deletion: ${user.username}`);
+                    }
+                }
+            } catch (err) {
+                console.error('Error cleaning up guest account:', err);
+            }
+        }
+        
         res.json({ message: 'Session deleted' });
     } catch (err) {
         console.error('Delete session error:', err);

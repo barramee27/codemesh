@@ -1,4 +1,5 @@
 const Session = require('../models/Session');
+const User = require('../models/User');
 const { transformOp, applyOp } = require('../utils/ot');
 
 // In-memory state for active sessions
@@ -35,6 +36,39 @@ const USER_COLORS = [
 
 function getColor(index) {
     return USER_COLORS[index % USER_COLORS.length];
+}
+
+// Helper function to check if user is guest and delete if no sessions remain
+async function deleteGuestIfNoSessions(userId) {
+    try {
+        const user = await User.findById(userId);
+        if (!user) return;
+        
+        // Check if user is a guest (email ends with @guest.codemesh.local)
+        if (!user.email || !user.email.endsWith('@guest.codemesh.local')) {
+            return; // Not a guest, skip
+        }
+        
+        // Check if user has any remaining sessions (active or in DB)
+        const dbSessions = await Session.find({ owner: userId });
+        const hasActiveSessions = Array.from(activeSessions.values()).some(state => 
+            Array.from(state.users.values()).some(u => u.userId === userId)
+        );
+        
+        // If no sessions in DB and no active sessions, delete guest account
+        if (dbSessions.length === 0 && !hasActiveSessions) {
+            // Also remove from collaborators in other sessions
+            await Session.updateMany(
+                { 'collaborators.user': userId },
+                { $pull: { collaborators: { user: userId } } }
+            );
+            
+            await User.deleteOne({ _id: userId });
+            console.log(`Deleted guest account: ${user.username} (${user.email})`);
+        }
+    } catch (err) {
+        console.error('Error in deleteGuestIfNoSessions:', err);
+    }
 }
 
 function scheduleSave(sessionId) {
@@ -527,14 +561,35 @@ module.exports = function setupCollaboration(io) {
                         if (currentState && currentState.users.size === 0) {
                             // Final save
                             scheduleSave(sessionId);
-                            setTimeout(() => {
+                            setTimeout(async () => {
                                 const final = activeSessions.get(sessionId);
                                 if (final && final.users.size === 0) {
                                     activeSessions.delete(sessionId);
+                                    
+                                    // Check if session owner was a guest and delete guest account if no sessions remain
+                                    try {
+                                        const dbSession = await Session.findOne({ sessionId });
+                                        if (dbSession && dbSession.owner) {
+                                            await deleteGuestIfNoSessions(dbSession.owner);
+                                        }
+                                    } catch (err) {
+                                        console.error('Error checking guest cleanup:', err);
+                                    }
                                 }
                             }, SESSION_FINAL_CLEANUP_MS);
                         }
                     }, SESSION_CLEANUP_DELAY_MS);
+                } else {
+                    // Check if disconnecting user is a guest and delete account if no sessions remain
+                    if (socket.userId) {
+                        setTimeout(async () => {
+                            try {
+                                await deleteGuestIfNoSessions(socket.userId);
+                            } catch (err) {
+                                console.error('Error checking guest cleanup on disconnect:', err);
+                            }
+                        }, 1000); // Small delay to ensure session cleanup completes
+                    }
                 }
             }
         });
