@@ -1481,6 +1481,33 @@ select.input-full {
   color: var(--vscode-list-active-fg);
 }
 
+.file-tree-folder-row {
+  display: flex;
+  align-items: center;
+  padding: 3px 10px 3px 0;
+  cursor: pointer;
+  color: var(--vscode-sidebar-fg);
+  user-select: none;
+}
+
+.file-tree-folder-row:hover {
+  background: var(--vscode-list-hover-bg);
+}
+
+.file-tree-chevron {
+  margin-right: 2px;
+  opacity: 0.85;
+  font-size: 12px;
+}
+
+.file-tree-folder-name {
+  font-size: 13px;
+}
+
+.file-tree-folder-children {
+  margin: 0;
+}
+
 .file-icon {
   margin-right: 6px;
   color: #519aba; /* Default file icon color */

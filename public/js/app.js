@@ -28,8 +28,12 @@
         openTabs: new Set(), // Set of fileIds
         splitEditor: null,
         splitActive: false,
-        terminal: null
+        terminal: null,
+        /** Folder paths (e.g. `routes`) collapsed in explorer; absent = expanded */
+        fileTreeCollapsed: new Set()
     };
+
+    let xtermCtorCached = null;
 
     // ─── API Helper ───
     const API_BASE = '/api';
@@ -1355,52 +1359,157 @@
         updateStatusbarLanguage(lang);
     }
 
-    // ─── File Tree & Layout Setup ───
-    function renderFileTree() {
-        const fileTree = document.getElementById('file-tree');
-        if (!fileTree) return;
+    // ─── File Tree (nested folders from path names, e.g. routes/auth.js) ───
+    function fileIconForLang(lang, isFolder) {
+        if (isFolder) return { iconClass: 'codicon-folder', iconColor: '#dcb67a' };
+        let iconClass = 'codicon-file';
+        let iconColor = '#519aba';
+        if (lang === 'html') { iconClass = 'codicon-code'; iconColor = '#e34c26'; }
+        else if (lang === 'css') { iconClass = 'codicon-symbol-color'; iconColor = '#563d7c'; }
+        else if (lang === 'python') { iconClass = 'codicon-symbol-misc'; iconColor = '#3572A5'; }
+        else if (lang === 'java') { iconClass = 'codicon-symbol-class'; iconColor = '#b07219'; }
+        else if (lang === 'javascript' || lang === 'typescript') { iconClass = 'codicon-symbol-class'; iconColor = '#f1e05a'; }
+        else if (lang === 'plaintext') { iconClass = 'codicon-file'; iconColor = '#6e7681'; }
+        return { iconClass, iconColor };
+    }
 
+    function buildFileTrie(filesMap) {
+        const root = { kind: 'root', children: Object.create(null) };
+        filesMap.forEach((file, id) => {
+            const parts = String(file.name || '').replace(/\\/g, '/').split('/').filter(Boolean);
+            if (!parts.length) return;
+            let node = root;
+            for (let i = 0; i < parts.length; i++) {
+                const seg = parts[i];
+                const isLast = i === parts.length - 1;
+                if (!node.children) node.children = Object.create(null);
+                if (isLast) {
+                    node.children[seg] = { kind: 'file', id, file, seg };
+                } else {
+                    const ex = node.children[seg];
+                    if (ex && ex.kind === 'file') {
+                        const joined = parts.slice(i).join('/');
+                        node.children[joined] = { kind: 'file', id, file, seg: joined };
+                        return;
+                    }
+                    if (!ex || ex.kind !== 'dir') {
+                        node.children[seg] = { kind: 'dir', seg, children: Object.create(null) };
+                    }
+                    node = node.children[seg];
+                }
+            }
+        });
+        return root;
+    }
+
+    function sortTrieEntries(entries) {
+        return entries.sort(([a, na], [b, nb]) => {
+            const da = na.kind === 'dir' ? 0 : 1;
+            const db = nb.kind === 'dir' ? 0 : 1;
+            if (da !== db) return da - db;
+            return a.localeCompare(b, undefined, { sensitivity: 'base' });
+        });
+    }
+
+    function renderTrieHtml(node, depth, pathPrefix) {
+        if (!node.children) return '';
+        const entries = sortTrieEntries(Object.entries(node.children));
         let html = '';
-        state.files.forEach((file, id) => {
-            const lang = file.language || 'javascript';
-            let iconClass = 'codicon-file';
-            let iconColor = '#519aba';
-            if (lang === 'html') { iconClass = 'codicon-code'; iconColor = '#e34c26'; }
-            else if (lang === 'css') { iconClass = 'codicon-symbol-color'; iconColor = '#563d7c'; }
-            else if (lang === 'python') { iconClass = 'codicon-symbol-misc'; iconColor = '#3572A5'; }
-            else if (lang === 'java') { iconClass = 'codicon-symbol-class'; iconColor = '#b07219'; }
-            else if (lang === 'javascript' || lang === 'typescript') { iconClass = 'codicon-symbol-class'; iconColor = '#f1e05a'; }
-            else if (lang === 'plaintext' || file.name.includes('/')) { iconClass = 'codicon-file'; iconColor = '#6e7681'; }
-
-            const isActive = id === state.activeFileId ? 'active' : '';
-
-            html += `
-                <div class="file-item ${isActive}" data-file-id="${id}" onclick="openFile('${id}')">
+        for (const [name, child] of entries) {
+            const pad = 6 + depth * 14;
+            if (child.kind === 'file') {
+                const { id, file } = child;
+                const lang = file.language || inferLanguageFromFileName(file.name);
+                const { iconClass, iconColor } = fileIconForLang(lang, false);
+                const isActive = id === state.activeFileId ? 'active' : '';
+                html += `
+                <div class="file-item ${isActive}" data-file-id="${id}" style="padding-left:${pad}px">
                     <i class="codicon ${iconClass} file-icon" style="color: ${iconColor}; margin-right: 6px;"></i>
-                    <span style="flex:1;">${escapeHtml(file.name)}</span>
+                    <span style="flex:1;" title="${escapeHtml(file.name)}">${escapeHtml(name)}</span>
                     ${state.userRole !== 'viewer' && state.files.size > 1 ? `
                     <div class="file-actions" style="opacity:0; display:flex; align-items:center;">
-                        <button class="btn btn-icon btn-xs file-action-icon" style="background:none;border:none;color:inherit;cursor:pointer;padding:2px;" onclick="event.stopPropagation(); deleteFile('${id}')" title="Delete">
+                        <button type="button" class="btn btn-icon btn-xs file-action-icon" style="background:none;border:none;color:inherit;cursor:pointer;padding:2px;" data-delete-file="${id}" title="Delete">
                             <i class="codicon codicon-trash"></i>
                         </button>
                     </div>` : ''}
-                </div>
-            `;
-        });
+                </div>`;
+            } else {
+                const folderKey = pathPrefix ? `${pathPrefix}/${name}` : name;
+                const collapsed = state.fileTreeCollapsed.has(folderKey);
+                const chev = collapsed ? 'codicon-chevron-right' : 'codicon-chevron-down';
+                html += `
+                <div class="file-tree-folder" style="padding-left:${pad}px">
+                    <div class="file-tree-folder-row" data-tree-toggle="${encodeURIComponent(folderKey)}">
+                        <i class="codicon ${chev} file-tree-chevron"></i>
+                        <i class="codicon codicon-folder file-icon" style="color:#dcb67a;margin-right:6px;"></i>
+                        <span class="file-tree-folder-name" title="${escapeHtml(folderKey)}">${escapeHtml(name)}</span>
+                    </div>
+                    ${collapsed ? '' : `<div class="file-tree-folder-children">${renderTrieHtml(child, depth + 1, folderKey)}</div>`}
+                </div>`;
+            }
+        }
+        return html;
+    }
 
-        fileTree.innerHTML = html;
-        
-        // Add hover effect for file actions
-        fileTree.querySelectorAll('.file-item').forEach(item => {
-            item.addEventListener('mouseenter', () => {
-                const actions = item.querySelector('.file-actions');
-                if(actions) actions.style.opacity = '1';
-            });
-            item.addEventListener('mouseleave', () => {
-                const actions = item.querySelector('.file-actions');
-                if(actions) actions.style.opacity = '0';
-            });
+    function onFileTreeClick(e) {
+        const toggle = e.target.closest('[data-tree-toggle]');
+        if (toggle) {
+            e.preventDefault();
+            const raw = toggle.getAttribute('data-tree-toggle');
+            const key = raw ? decodeURIComponent(raw) : '';
+            if (!key) return;
+            if (state.fileTreeCollapsed.has(key)) state.fileTreeCollapsed.delete(key);
+            else state.fileTreeCollapsed.add(key);
+            renderFileTree();
+            return;
+        }
+        const delBtn = e.target.closest('[data-delete-file]');
+        if (delBtn) {
+            e.stopPropagation();
+            const fid = delBtn.getAttribute('data-delete-file');
+            if (fid) window.deleteFile(fid);
+            return;
+        }
+        const row = e.target.closest('.file-item[data-file-id]');
+        if (row && row.dataset.fileId) {
+            window.openFile(row.dataset.fileId);
+        }
+    }
+
+    function bindFileTreeDelegationOnce() {
+        const fileTree = document.getElementById('file-tree');
+        if (!fileTree || fileTree.dataset.clickBound === '1') return;
+        fileTree.dataset.clickBound = '1';
+        fileTree.addEventListener('click', onFileTreeClick);
+        fileTree.addEventListener('mouseover', (e) => {
+            const item = e.target.closest('.file-item');
+            if (!item || !fileTree.contains(item)) return;
+            const act = item.querySelector('.file-actions');
+            if (act) act.style.opacity = '1';
         });
+        fileTree.addEventListener('mouseout', (e) => {
+            const item = e.target.closest('.file-item');
+            if (!item) return;
+            const rel = e.relatedTarget;
+            if (rel && item.contains(rel)) return;
+            const act = item.querySelector('.file-actions');
+            if (act) act.style.opacity = '0';
+        });
+    }
+
+    function renderFileTree() {
+        const fileTree = document.getElementById('file-tree');
+        if (!fileTree) return;
+        bindFileTreeDelegationOnce();
+
+        const trie = buildFileTrie(state.files);
+        fileTree.innerHTML = renderTrieHtml(trie, 0, '');
+    }
+
+    function fileBasename(path) {
+        const n = String(path || '').replace(/\\/g, '/');
+        const i = n.lastIndexOf('/');
+        return i >= 0 ? n.slice(i + 1) : n;
     }
 
     function renderTabs() {
@@ -1415,7 +1524,7 @@
                 return;
             }
             
-            const lang = file.language || 'javascript';
+            const lang = file.language || inferLanguageFromFileName(file.name);
             let iconClass = 'codicon-file';
             let iconColor = '#519aba';
             if (lang === 'html') { iconClass = 'codicon-code'; iconColor = '#e34c26'; }
@@ -1425,10 +1534,11 @@
             else if (lang === 'javascript' || lang === 'typescript') { iconClass = 'codicon-symbol-class'; iconColor = '#f1e05a'; }
 
             const isActive = id === state.activeFileId ? 'active' : '';
+            const tabLabel = fileBasename(file.name);
             html += `
                 <div class="editor-tab ${isActive}" data-file-id="${id}" onclick="openFile('${id}')">
                     <i class="codicon ${iconClass} tab-icon" style="color: ${iconColor}; margin-right: 6px;"></i>
-                    <span class="tab-title">${escapeHtml(file.name)}</span>
+                    <span class="tab-title" title="${escapeHtml(file.name)}">${escapeHtml(tabLabel)}</span>
                     <button class="btn btn-icon btn-xs tab-close" onclick="event.stopPropagation(); closeTab('${id}')" style="background:none;border:none;color:inherit;cursor:pointer;">
                         <i class="codicon codicon-close"></i>
                     </button>
@@ -1654,12 +1764,42 @@
         }
     }
 
-    // ─── Integrated Terminal ───
+    // ─── Integrated Terminal (ESM xterm — script-tag UMD breaks after Monaco’s AMD define) ───
+    async function ensureXtermCss() {
+        if (document.querySelector('link[data-codemesh-xterm-css]')) return;
+        const link = document.createElement('link');
+        link.rel = 'stylesheet';
+        link.href = 'https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.min.css';
+        link.dataset.codemeshXtermCss = '1';
+        document.head.appendChild(link);
+    }
+
+    async function loadXtermConstructor() {
+        if (xtermCtorCached) return xtermCtorCached;
+        const urls = [
+            'https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/+esm',
+            'https://esm.sh/@xterm/xterm@5.5.0'
+        ];
+        let lastErr;
+        for (const u of urls) {
+            try {
+                const mod = await import(u);
+                const T = mod.Terminal || mod.default;
+                if (typeof T === 'function') {
+                    xtermCtorCached = T;
+                    return T;
+                }
+            } catch (e) {
+                lastErr = e;
+            }
+        }
+        throw lastErr || new Error('Could not load xterm module');
+    }
+
     async function initTerminal() {
         const container = document.getElementById('terminal-container');
         if (!container || state.terminal) return;
-        
-        // Check if terminal is enabled
+
         try {
             const status = await api('/terminal/status');
             if (!status.enabled) {
@@ -1672,59 +1812,131 @@
                 return;
             }
         } catch (err) {
-            container.innerHTML = '<div class="problems-placeholder">Failed to check terminal status.</div>';
+            container.innerHTML = '<div class="problems-placeholder">Could not reach terminal API: ' +
+                escapeHtml(err.message || 'unknown error') + '</div>';
             return;
         }
-        
-        if (typeof Terminal === 'undefined') {
-            container.innerHTML = '<div class="problems-placeholder">Loading xterm.js...</div>';
-            const link = document.createElement('link');
-            link.rel = 'stylesheet';
-            link.href = 'https://cdnjs.cloudflare.com/ajax/libs/xterm/5.5.0/xterm.min.css';
-            document.head.appendChild(link);
-            const script = document.createElement('script');
-            script.src = 'https://cdnjs.cloudflare.com/ajax/libs/xterm/5.5.0/xterm.js';
-            script.onload = () => { state.terminal = null; initTerminal(); };
-            script.onerror = () => container.innerHTML = '<div class="problems-placeholder">Failed to load xterm.js. Check your connection or try again.</div>';
-            document.head.appendChild(script);
+
+        container.innerHTML = '<div class="problems-placeholder">Loading terminal…</div>';
+
+        try {
+            await ensureXtermCss();
+            const Terminal = await loadXtermConstructor();
+            container.innerHTML = '';
+            const term = new Terminal({ cursorBlink: true, theme: { background: '#1e1e1e', foreground: '#d4d4d4' } });
+            term.open(container);
+            term.writeln('CodeMesh Terminal (type a command and press Enter)');
+            term.writeln('Allowed: node, python3, python, ls, pwd, echo, clear, whoami, date');
+            term.write('\r\n$ ');
+            let currentLine = '';
+            term.onData((data) => {
+                if (data === '\r' || data === '\n') {
+                    const cmd = currentLine.trim();
+                    currentLine = '';
+                    if (cmd === 'clear') {
+                        term.clear();
+                        term.write('$ ');
+                        return;
+                    }
+                    if (!cmd) { term.write('\r\n$ '); return; }
+                    term.writeln('');
+                    api('/terminal/exec', { method: 'POST', body: JSON.stringify({ command: cmd }) })
+                        .then(r => {
+                            if (r.output) term.writeln(r.output);
+                            if (r.error) term.writeln('\x1b[31m' + r.error + '\x1b[0m');
+                        })
+                        .catch(err => term.writeln('\x1b[31mError: ' + err.message + '\x1b[0m'))
+                        .finally(() => term.write('\r\n$ '));
+                } else if (data === '\u007F') {
+                    if (currentLine.length) {
+                        currentLine = currentLine.slice(0, -1);
+                        term.write('\b \b');
+                    }
+                } else {
+                    currentLine += data;
+                    term.write(data);
+                }
+            });
+            state.terminal = term;
+        } catch (err) {
+            container.innerHTML = '<div class="problems-placeholder">Terminal load failed: ' +
+                escapeHtml(err.message || String(err)) + '</div>';
+        }
+    }
+
+    function sessionUsesNextJs() {
+        for (const f of state.files.values()) {
+            const n = (f.name || '').replace(/\\/g, '/').toLowerCase();
+            if (!n.endsWith('package.json')) continue;
+            try {
+                const j = JSON.parse(f.doc || '{}');
+                if (j.dependencies?.next || j.devDependencies?.next) return true;
+            } catch (_) { /* ignore */ }
+        }
+        return false;
+    }
+
+    function openHtmlPreviewInNewTab() {
+        const iframe = document.getElementById('preview-iframe');
+        const fromIframe = (iframe && iframe.srcdoc) ? String(iframe.srcdoc).trim() : '';
+        const nextHint = () => {
+            if (sessionUsesNextJs()) {
+                showToast('Next.js: CodeMesh only serves static HTML here. Use npm run dev on your machine for full SSR/hot reload.', 'info');
+            }
+        };
+
+        if (fromIframe) {
+            const u = URL.createObjectURL(new Blob([fromIframe], { type: 'text/html;charset=utf-8' }));
+            const w = window.open(u, '_blank', 'noopener,noreferrer');
+            if (!w) {
+                URL.revokeObjectURL(u);
+                showToast('Pop-up blocked — allow pop-ups for this site to open the preview.', 'error');
+                return;
+            }
+            setTimeout(() => URL.revokeObjectURL(u), 180000);
+            nextHint();
             return;
         }
-        container.innerHTML = '';
-        const term = new Terminal({ cursorBlink: true, theme: { background: '#1e1e1e', foreground: '#d4d4d4' } });
-        term.open(container);
-        term.writeln('CodeMesh Terminal (type a command and press Enter)');
-        term.writeln('Allowed: node, python3, python, ls, pwd, echo, clear, whoami, date');
-        term.write('\r\n$ ');
-        let currentLine = '';
-        term.onData((data) => {
-            if (data === '\r' || data === '\n') {
-                const cmd = currentLine.trim();
-                currentLine = '';
-                if (cmd === 'clear') {
-                    term.clear();
-                    term.write('$ ');
-                    return;
-                }
-                if (!cmd) { term.write('\r\n$ '); return; }
-                term.writeln('');
-                api('/terminal/exec', { method: 'POST', body: JSON.stringify({ command: cmd }) })
-                    .then(r => {
-                        if (r.output) term.writeln(r.output);
-                        if (r.error) term.writeln('\x1b[31m' + r.error + '\x1b[0m');
-                    })
-                    .catch(err => term.writeln('\x1b[31mError: ' + err.message + '\x1b[0m'))
-                    .finally(() => term.write('\r\n$ '));
-            } else if (data === '\u007F') {
-                if (currentLine.length) {
-                    currentLine = currentLine.slice(0, -1);
-                    term.write('\b \b');
-                }
-            } else {
-                currentLine += data;
-                term.write(data);
+
+        let bestHtml = null;
+        let bestScore = -1;
+        state.files.forEach((file) => {
+            const n = (file.name || '').toLowerCase().replace(/\\/g, '/');
+            if (!n.endsWith('.html') && !n.endsWith('.htm')) return;
+            const doc = String(file.doc || '').trim();
+            if (!doc) return;
+            let score = 1;
+            if (n === 'index.html' || n.endsWith('/index.html')) score = 3;
+            else if (n.endsWith('index.html')) score = 2;
+            if (score > bestScore) {
+                bestScore = score;
+                bestHtml = doc;
             }
         });
-        state.terminal = term;
+        if (bestHtml) {
+            const u = URL.createObjectURL(new Blob([bestHtml], { type: 'text/html;charset=utf-8' }));
+            const w = window.open(u, '_blank', 'noopener,noreferrer');
+            if (!w) {
+                URL.revokeObjectURL(u);
+                showToast('Pop-up blocked — allow pop-ups for this site.', 'error');
+                return;
+            }
+            setTimeout(() => URL.revokeObjectURL(u), 180000);
+            nextHint();
+            return;
+        }
+
+        if (state.currentSession) {
+            const w = window.open(`${window.location.origin}/${state.currentSession}/web`, '_blank', 'noopener,noreferrer');
+            if (!w) {
+                showToast('Pop-up blocked — allow pop-ups for this site.', 'error');
+                return;
+            }
+            nextHint();
+            return;
+        }
+
+        showToast('No HTML preview yet — Run on an .html file, or save index.html and try again.', 'info');
     }
 
     // ─── Editor Toolbar Events ───
@@ -1807,12 +2019,7 @@
         });
 
         document.getElementById('open-preview-new-tab')?.addEventListener('click', () => {
-            const iframe = document.getElementById('preview-iframe');
-            if (iframe && iframe.srcdoc) {
-                const w = window.open('', '_blank');
-                w.document.write(iframe.srcdoc);
-                w.document.close();
-            }
+            openHtmlPreviewInNewTab();
         });
 
         // Ctrl+Enter to run code, Ctrl+S to save
