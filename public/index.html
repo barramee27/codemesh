@@ -304,35 +304,19 @@
           <h3 class="modal-title">Create New Session</h3>
           <form id="create-session-form">
             <div class="form-group">
-              <label for="session-title">Session Title</label>
-              <input type="text" id="session-title" placeholder="My awesome project" required
+              <label for="session-title">Session Title <span class="label-hint">(optional)</span></label>
+              <input type="text" id="session-title" placeholder="My awesome project"
                 class="input-full">
             </div>
             <div class="form-group">
-              <label for="custom-session-id">Custom Session ID <span class="label-hint">(optional, 3-20
+              <label for="custom-session-id">Custom Session ID <span class="label-hint">(optional, 3–50
                   chars)</span></label>
-              <input type="text" id="custom-session-id" placeholder="e.g. my-project-123"
-                class="input-full" pattern="[a-zA-Z0-9_-]{3,20}" maxlength="20">
+              <input type="text" id="custom-session-id" placeholder="e.g. A2-042 or my-project"
+                class="input-full" pattern="[a-zA-Z0-9_-]{3,50}" maxlength="50">
             </div>
-            <div class="form-group">
-              <label for="session-language">Language</label>
-              <select id="session-language" class="input-full">
-                <option value="javascript">JavaScript</option>
-                <option value="python">Python</option>
-                <option value="typescript">TypeScript</option>
-                <option value="java">Java</option>
-                <option value="cpp">C++</option>
-                <option value="csharp">C#</option>
-                <option value="go">Go</option>
-                <option value="rust">Rust</option>
-                <option value="php">PHP</option>
-                <option value="ruby">Ruby</option>
-                <option value="html">HTML</option>
-                <option value="css">CSS</option>
-                <option value="sql">SQL</option>
-                <option value="markdown">Markdown</option>
-              </select>
-            </div>
+            <p class="form-hint" style="font-size:0.85rem;color:var(--text-muted);margin:0 0 0.5rem;">
+              Language is chosen from file extensions (e.g. <code>.cpp</code>, <code>.js</code>) when you add files in the editor.
+            </p>
             <div class="modal-actions">
               <button type="button" class="btn btn-ghost" id="cancel-create-btn">Cancel</button>
               <button type="submit" class="btn btn-primary">Create Session</button>
@@ -623,23 +607,8 @@
         <span class="statusbar-item">Spaces: 4</span>
         <span class="statusbar-item">UTF-8</span>
         <span class="statusbar-item">CRLF</span>
-        <span class="statusbar-item">
-          <select id="language-selector" class="statusbar-select" title="Select Language Mode">
-            <option value="javascript">JavaScript</option>
-            <option value="python">Python</option>
-            <option value="typescript">TypeScript</option>
-            <option value="java">Java</option>
-            <option value="cpp">C++</option>
-            <option value="csharp">C#</option>
-            <option value="go">Go</option>
-            <option value="rust">Rust</option>
-            <option value="php">PHP</option>
-            <option value="ruby">Ruby</option>
-            <option value="html">HTML</option>
-            <option value="css">CSS</option>
-            <option value="sql">SQL</option>
-            <option value="markdown">Markdown</option>
-          </select>
+        <span class="statusbar-item" id="statusbar-lang-wrap" title="From active file name (e.g. app.cpp → C++)">
+          <span id="statusbar-lang">JavaScript</span>
         </span>
         <span class="statusbar-item" title="Prettier">Prettier</span>
         <span class="statusbar-item" title="Feedback">

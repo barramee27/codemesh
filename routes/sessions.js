@@ -9,6 +9,57 @@ const JWT_SECRET = process.env.JWT_SECRET || 'fallback_secret';
 
 const router = express.Router();
 
+const SESSION_ID_RE = /^[a-zA-Z0-9_-]{3,50}$/;
+
+// POST /api/sessions/join-or-create — load or create a public session by ID (shareable URLs like /A2-042)
+router.post('/join-or-create', authMiddleware, async (req, res) => {
+    try {
+        const raw = (req.body.sessionId || '').trim();
+        if (!SESSION_ID_RE.test(raw)) {
+            return res.status(400).json({
+                error: 'Session ID must be 3–50 characters: letters, numbers, _ or - only'
+            });
+        }
+
+        let session = await Session.findOne({ sessionId: raw })
+            .populate('owner', 'username')
+            .populate('collaborators.user', 'username');
+
+        if (session) {
+            const isOwner = session.owner._id.toString() === req.user.id;
+            const isCollab = session.collaborators.some(
+                c => c.user && c.user._id.toString() === req.user.id
+            );
+            if (!session.isPublic && !isOwner && !isCollab) {
+                return res.status(403).json({ error: 'This session is private' });
+            }
+            return res.json(session);
+        }
+
+        const fileId = 'f_' + uuidv4().split('-')[0];
+        session = new Session({
+            sessionId: raw,
+            title: (req.body.title && String(req.body.title).trim()) || raw,
+            language: 'javascript',
+            code: '',
+            files: [{
+                id: fileId,
+                name: 'main.js',
+                content: '',
+                language: 'javascript'
+            }],
+            owner: req.user.id,
+            isPublic: true
+        });
+        await session.save();
+        await session.populate('owner', 'username');
+        return res.status(201).json(session);
+    } catch (err) {
+        console.error('join-or-create error:', err);
+        return res.status(500).json({ error: 'Failed to open or create session' });
+    }
+});
+
 // POST /api/sessions — create new session
 router.post('/', authMiddleware, async (req, res) => {
     try {
@@ -18,9 +69,9 @@ router.post('/', authMiddleware, async (req, res) => {
         let sessionId;
         if (customSessionId) {
             const cleanId = customSessionId.trim();
-            if (!/^[a-zA-Z0-9_-]{3,20}$/.test(cleanId)) {
+            if (!SESSION_ID_RE.test(cleanId)) {
                 return res.status(400).json({
-                    error: 'Custom ID must be 3-20 characters, alphanumeric with _ or - only'
+                    error: 'Custom ID must be 3-50 characters, alphanumeric with _ or - only'
                 });
             }
             // Check uniqueness

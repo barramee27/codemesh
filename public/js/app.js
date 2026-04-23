@@ -148,6 +148,7 @@
                 localStorage.setItem('codemesh_token', data.token);
                 localStorage.setItem('codemesh_user', JSON.stringify(data.user));
 
+                sessionStorage.removeItem('codemesh_explicit_logout');
                 showToast('Welcome back, ' + data.user.username + '!', 'success');
                 loadDashboard();
             } catch (err) {
@@ -179,6 +180,7 @@
                 localStorage.setItem('codemesh_token', data.token);
                 localStorage.setItem('codemesh_user', JSON.stringify(data.user));
 
+                sessionStorage.removeItem('codemesh_explicit_logout');
                 showToast('Account created! Welcome, ' + data.user.username + '!', 'success');
                 loadDashboard();
             } catch (err) {
@@ -201,6 +203,7 @@
                 state.user = data.user;
                 localStorage.setItem('codemesh_token', data.token);
                 localStorage.setItem('codemesh_user', JSON.stringify(data.user));
+                sessionStorage.removeItem('codemesh_explicit_logout');
                 showToast('Welcome, ' + data.user.username + '!', 'success');
                 loadDashboard();
             } catch (err) {
@@ -310,24 +313,49 @@
         state.user = null;
         localStorage.removeItem('codemesh_token');
         localStorage.removeItem('codemesh_user');
+        sessionStorage.setItem('codemesh_explicit_logout', '1');
         if (state.socket) { state.socket.disconnect(); state.socket = null; }
         showView('auth');
         initParticles();
     }
 
-    // ─── URL session routing (e.g. /work opens session "work") ───
+    // ─── URL session routing (e.g. /A2-042 opens or creates that session) ───
+    const RESERVED_PATH_SEGMENTS = new Set([
+        'api', 'css', 'js', 'uploads', 'socket.io', 'reset-password', 'admin', 'login', 'register'
+    ]);
+
     function getSessionIdFromPath() {
         const path = window.location.pathname.replace(/^\/+|\/+$/g, '');
-        if (!path || path === 'api' || path === 'css' || path === 'js' || path === 'socket.io') return null;
+        if (!path || RESERVED_PATH_SEGMENTS.has(path.toLowerCase())) return null;
         if (/^[a-zA-Z0-9_-]{3,50}$/.test(path)) return path;
         return null;
     }
 
-    function openSessionFromUrlIfAny() {
-        const sessionId = getSessionIdFromPath();
-        if (sessionId && state.token) {
-            openEditor(sessionId);
+    async function ensureGuestIfNeeded() {
+        // Stale JWT in localStorage skips guest and breaks every API + WebSocket — revalidate first.
+        if (state.token) {
+            try {
+                const res = await fetch(`${API_BASE}/sessions`, {
+                    headers: { Authorization: `Bearer ${state.token}` }
+                });
+                if (res.status !== 401) return;
+            } catch (e) {
+                return;
+            }
+            state.token = null;
+            state.user = null;
+            localStorage.removeItem('codemesh_token');
+            localStorage.removeItem('codemesh_user');
         }
+
+        const data = await api('/auth/guest', {
+            method: 'POST',
+            body: JSON.stringify({})
+        });
+        state.token = data.token;
+        state.user = data.user;
+        localStorage.setItem('codemesh_token', data.token);
+        localStorage.setItem('codemesh_user', JSON.stringify(data.user));
     }
 
     // ─── Dashboard ───
@@ -349,8 +377,6 @@
         } catch (err) {
             showToast('Failed to load sessions', 'error');
         }
-
-        openSessionFromUrlIfAny();
     }
 
     function renderSessions(sessions) {
@@ -423,9 +449,9 @@
             e.preventDefault();
             try {
                 const customId = document.getElementById('custom-session-id')?.value?.trim();
+                const titleVal = document.getElementById('session-title')?.value?.trim();
                 const body = {
-                    title: document.getElementById('session-title')?.value,
-                    language: document.getElementById('session-language')?.value
+                    title: titleVal || undefined
                 };
                 if (customId) body.customSessionId = customId;
 
@@ -488,6 +514,7 @@
             css: 'css',
             java: 'java',
             cpp: 'cpp',
+            c: 'c',
             csharp: 'csharp',
             php: 'php',
             rust: 'rust',
@@ -495,9 +522,59 @@
             markdown: 'markdown',
             go: 'go',
             ruby: 'ruby',
+            json: 'json',
+            yaml: 'yaml',
+            xml: 'xml',
+            shell: 'shell',
+            scss: 'scss',
+            less: 'less',
             plaintext: 'plaintext'
         };
         return langMap[lang] || 'javascript';
+    }
+
+    /** VS Code–style: language from file name / extension */
+    function inferLanguageFromFileName(name) {
+        const lower = (name || '').toLowerCase();
+        const dot = lower.lastIndexOf('.');
+        const ext = dot >= 0 ? lower.slice(dot) : '';
+        const byExt = {
+            '.js': 'javascript', '.mjs': 'javascript', '.cjs': 'javascript', '.jsx': 'javascript',
+            '.ts': 'typescript', '.tsx': 'typescript',
+            '.py': 'python', '.pyw': 'python',
+            '.html': 'html', '.htm': 'html',
+            '.css': 'css', '.scss': 'scss', '.less': 'less',
+            '.java': 'java',
+            '.cpp': 'cpp', '.cc': 'cpp', '.cxx': 'cpp', '.hpp': 'cpp', '.hh': 'cpp',
+            '.c': 'c', '.h': 'c',
+            '.cs': 'csharp',
+            '.go': 'go',
+            '.rs': 'rust',
+            '.php': 'php',
+            '.rb': 'ruby',
+            '.sql': 'sql',
+            '.md': 'markdown', '.markdown': 'markdown',
+            '.json': 'json', '.yaml': 'yaml', '.yml': 'yaml',
+            '.xml': 'xml',
+            '.sh': 'shell', '.bash': 'shell', '.zsh': 'shell',
+            '.gitkeep': 'plaintext'
+        };
+        return byExt[ext] || 'plaintext';
+    }
+
+    function languageDisplayName(lang) {
+        const m = {
+            javascript: 'JavaScript', typescript: 'TypeScript', python: 'Python', html: 'HTML', css: 'CSS',
+            java: 'Java', cpp: 'C++', c: 'C', csharp: 'C#', go: 'Go', rust: 'Rust', php: 'PHP', ruby: 'Ruby',
+            sql: 'SQL', markdown: 'Markdown', json: 'JSON', yaml: 'YAML', xml: 'XML', shell: 'Shell',
+            scss: 'SCSS', less: 'LESS', plaintext: 'Plain Text'
+        };
+        return m[lang] || (lang ? lang.charAt(0).toUpperCase() + lang.slice(1) : 'Plain Text');
+    }
+
+    function updateStatusbarLanguage(lang) {
+        const el = document.getElementById('statusbar-lang');
+        if (el) el.textContent = languageDisplayName(lang || 'plaintext');
     }
 
 
@@ -743,28 +820,11 @@
             // Load Monaco modules
             await loadMonaco();
 
-            // Load session data (create if doesn't exist, e.g. for /work)
-            let sessionData;
-            try {
-                sessionData = await api(`/sessions/${sessionId}`);
-            } catch {
-                try {
-                    sessionData = await api('/sessions', {
-                        method: 'POST',
-                        body: JSON.stringify({
-                            title: sessionId === 'work' ? 'Work' : sessionId,
-                            language: 'javascript',
-                            customSessionId: sessionId
-                        })
-                    });
-                } catch (createErr) {
-                    try {
-                        sessionData = await api(`/sessions/${sessionId}`);
-                    } catch {
-                        sessionData = { sessionId, title: 'Shared Session', language: 'javascript', code: '' };
-                    }
-                }
-            }
+            // Load or create session (shareable URL; requires guest/auth token)
+            const sessionData = await api('/sessions/join-or-create', {
+                method: 'POST',
+                body: JSON.stringify({ sessionId, title: sessionId })
+            });
 
             state.currentSession = sessionId;
             if (state.terminal) { state.terminal.dispose(); state.terminal = null; }
@@ -779,16 +839,10 @@
             document.getElementById('editor-session-title').textContent = sessionData.title;
             document.getElementById('editor-session-id').textContent = `${sessionId}`;
             
-            // Set language in dropdown if we have files
-            if (sessionData.files && sessionData.files.length > 0) {
-                document.getElementById('language-selector').value = sessionData.files[0].language || 'javascript';
-            } else {
-                document.getElementById('language-selector').value = sessionData.language || 'javascript';
-            }
-            const statusbarLangEl = document.getElementById('statusbar-lang');
-            if (statusbarLangEl) {
-                statusbarLangEl.textContent = document.getElementById('language-selector').options[document.getElementById('language-selector').selectedIndex].text;
-            }
+            const firstLang = (sessionData.files && sessionData.files.length > 0)
+                ? (sessionData.files[0].language || inferLanguageFromFileName(sessionData.files[0].name))
+                : (sessionData.language || 'javascript');
+            updateStatusbarLanguage(firstLang);
 
             // Clear and create editor
             container.innerHTML = '';
@@ -822,7 +876,7 @@
             state.socket.emit('join-session', {
                 sessionId,
                 username: state.user ? state.user.username : 'Anonymous',
-                userId: state.user ? state.user._id : null
+                userId: state.user ? (state.user.id || state.user._id) : null
             });
         });
 
@@ -1002,12 +1056,12 @@
         });
 
         state.socket.on('language-changed', (data) => {
-            const { fileId, language, userId } = data;
+            const { fileId, language } = data;
             const file = state.files.get(fileId);
             if (file) {
                 file.language = language;
                 if (fileId === state.activeFileId) {
-                    document.getElementById('language-selector').value = language;
+                    updateStatusbarLanguage(language);
                     reconfigureLanguage(language);
                 } else {
                     renderFileTree();
@@ -1122,12 +1176,7 @@
         updateRemoteSelections(); // Restore selections
         renderFileTree(); // Update file extension
         renderTabs();
-        
-        const langSelect = document.getElementById('language-selector');
-        const statusbarLangEl = document.getElementById('statusbar-lang');
-        if (langSelect && statusbarLangEl) {
-            statusbarLangEl.textContent = langSelect.options[langSelect.selectedIndex].text;
-        }
+        updateStatusbarLanguage(lang);
     }
 
     // ─── File Tree & Layout Setup ───
@@ -1231,7 +1280,7 @@
         container.innerHTML = '';
         if (container2) { container2.innerHTML = ''; container2.style.display = state.splitActive ? '' : 'none'; }
         if (splitContainer) splitContainer.classList.toggle('split-active', state.splitActive);
-        state.editorView = createEditor(container, file.doc, file.language);
+        state.editorView = createEditor(container, file.doc, file.language || inferLanguageFromFileName(file.name));
         if (state.splitActive && container2) {
             const model = state.editorView.getModel();
             if (model) state.splitEditor = monaco.editor.create(container2, { model, readOnly: state.userRole === 'viewer' });
@@ -1242,13 +1291,8 @@
             setEditorReadOnly(true);
         }
 
-        // Update language selector
-        const langSelect = document.getElementById('language-selector');
-        const statusbarLangEl = document.getElementById('statusbar-lang');
-        if (langSelect) {
-            langSelect.value = file.language || 'javascript';
-            if (statusbarLangEl) statusbarLangEl.textContent = langSelect.options[langSelect.selectedIndex].text;
-        }
+        if (!file.language) file.language = inferLanguageFromFileName(file.name);
+        updateStatusbarLanguage(file.language);
 
         renderFileTree();
         renderTabs();
@@ -1447,8 +1491,7 @@
                     '<i class="codicon codicon-terminal" style="font-size: 48px; opacity: 0.3; margin-bottom: 12px;"></i>' +
                     '<p>Terminal Disabled</p>' +
                     '<p style="font-size: 12px; color: var(--vscode-descriptionForeground);">' +
-                    'Terminal is disabled for security in production.<br>' +
-                    'Set ENABLE_TERMINAL=true to enable (not recommended for public deployments).</p>' +
+                    'The host has turned the terminal off (DISABLE_TERMINAL).</p>' +
                     '</div>';
                 return;
             }
@@ -1524,11 +1567,6 @@
             if (up) up.style.display = 'none';
             history.replaceState({}, '', '/');
             loadDashboard();
-        });
-
-        document.getElementById('language-selector')?.addEventListener('change', (e) => {
-            const lang = e.target.value;
-            reconfigureLanguage(lang);
         });
 
         document.getElementById('copy-session-link')?.addEventListener('click', () => {
@@ -1675,14 +1713,9 @@
                 showToast('Open a session first.', 'info');
                 return;
             }
-            const name = prompt('Enter file name (e.g., style.css):');
+            const name = prompt('Enter file name (e.g., main.cpp, app.js, index.html):');
             if (!name) return;
-            let lang = 'javascript';
-            if (name.endsWith('.html')) lang = 'html';
-            else if (name.endsWith('.css')) lang = 'css';
-            else if (name.endsWith('.py')) lang = 'python';
-            else if (name.endsWith('.js')) lang = 'javascript';
-            else if (name.endsWith('.ts')) lang = 'typescript';
+            const lang = inferLanguageFromFileName(name);
             state.socket.emit('create-file', { sessionId: state.currentSession, name, language: lang });
         });
         document.getElementById('new-folder-action')?.addEventListener('click', (e) => {
@@ -1786,7 +1819,10 @@
         if (!state.editorView) return;
 
         const code = state.editorView.getValue();
-        const language = document.getElementById('language-selector').value;
+        const active = state.activeFileId && state.files.get(state.activeFileId);
+        const language = active
+            ? (active.language || inferLanguageFromFileName(active.name))
+            : 'javascript';
 
         if (!code.trim()) {
             showToast('Nothing to run — editor is empty', 'error');
@@ -2104,8 +2140,8 @@
         initEditorToolbar();
         initAdminPanel();
 
-        // Remove loading overlay
-        setTimeout(() => {
+        // Remove loading overlay; default to guest so share URLs and "New Session" work without login
+        setTimeout(async () => {
             const overlay = document.getElementById('loading-overlay');
             overlay.classList.add('hidden');
 
@@ -2114,12 +2150,32 @@
                 showView('reset-password');
                 const container = document.getElementById('reset-particles');
                 if (container) initParticlesIn(container);
-            } else if (state.token && state.user) {
-                loadDashboard();
-            } else {
+                return;
+            }
+
+            const pathSession = getSessionIdFromPath();
+            const skipAutoGuest = sessionStorage.getItem('codemesh_explicit_logout') === '1';
+            if (!pathSession && skipAutoGuest) {
                 showView('auth');
                 initParticles();
+                return;
             }
+
+            try {
+                await ensureGuestIfNeeded();
+            } catch (err) {
+                showToast(err.message || 'Could not start a session', 'error');
+                showView('auth');
+                initParticles();
+                return;
+            }
+
+            if (pathSession) {
+                await openEditor(pathSession);
+                return;
+            }
+
+            loadDashboard();
         }, 800);
     }
 

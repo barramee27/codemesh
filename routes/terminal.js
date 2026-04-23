@@ -4,8 +4,8 @@ const authMiddleware = require('../middleware/auth');
 
 const router = express.Router();
 
-// ─── Security: Terminal disabled by default in production ───
-const TERMINAL_ENABLED = process.env.ENABLE_TERMINAL === 'true' || process.env.NODE_ENV !== 'production';
+// ─── Terminal: on by default; set DISABLE_TERMINAL=true to turn off (e.g. locked-down hosting) ───
+const TERMINAL_ENABLED = process.env.DISABLE_TERMINAL !== 'true';
 
 const TIMEOUT_MS = 5000;
 // ─── Safe commands only (removed npm, npx, cat for security) ───
@@ -42,9 +42,9 @@ router.get('/status', (req, res) => {
 // POST /api/terminal/exec
 router.post('/exec', authMiddleware, (req, res) => {
     if (!TERMINAL_ENABLED) {
-        return res.status(403).json({ 
-            output: '', 
-            error: 'Terminal is disabled for security. Set ENABLE_TERMINAL=true in production to enable (not recommended).' 
+        return res.status(403).json({
+            output: '',
+            error: 'Terminal is disabled on this server (DISABLE_TERMINAL=true). Remove or unset that env var to enable.'
         });
     }
     

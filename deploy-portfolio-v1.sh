@@ -23,6 +23,6 @@ rsync -avz --delete \
   "${SRC}/" "${REMOTE}:${DEST}/"
 
 echo "Installing deps, building, and starting PM2 on VPS..."
-ssh "${REMOTE}" "cd ${DEST} && npm install --production=false && npm run build && pm2 delete portfolio-v1 2>/dev/null || true && pm2 start npm --name portfolio-v1 -- start && pm2 save"
+ssh "${REMOTE}" "cd ${DEST} && pnpm install --omit=dev=false && pnpm run build && pnpm install --omit=dev=false && pm2 delete portfolio-v1 2>/dev/null || true && pm2 start pnpm --name portfolio-v1 -- start && pm2 save"
 
 echo "Done. portfolio-v1 is running on PM2."
