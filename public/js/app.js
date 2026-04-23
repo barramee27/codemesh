@@ -319,16 +319,173 @@
         initParticles();
     }
 
-    // ─── URL session routing (e.g. /A2-042 opens or creates that session) ───
+    // ─── URL routing: /ROOM editor, /ROOM/web | /ROOM/site read-only HTML preview ═══
     const RESERVED_PATH_SEGMENTS = new Set([
-        'api', 'css', 'js', 'uploads', 'socket.io', 'reset-password', 'admin', 'login', 'register'
+        'api', 'css', 'js', 'uploads', 'socket.io', 'reset-password', 'admin', 'login', 'register',
+        'web', 'site'
     ]);
+    const PUBLISH_SUFFIXES = new Set(['web', 'site']);
 
-    function getSessionIdFromPath() {
-        const path = window.location.pathname.replace(/^\/+|\/+$/g, '');
-        if (!path || RESERVED_PATH_SEGMENTS.has(path.toLowerCase())) return null;
-        if (/^[a-zA-Z0-9_-]{3,50}$/.test(path)) return path;
+    let publishBlobUrl = null;
+
+    function parseAppPath() {
+        const raw = window.location.pathname.replace(/^\/+|\/+$/g, '');
+        if (!raw) return null;
+        const parts = raw.split('/').filter(Boolean);
+        const first = parts[0];
+        if (!first || RESERVED_PATH_SEGMENTS.has(first.toLowerCase())) return null;
+
+        if (parts.length === 1) {
+            if (/^[a-zA-Z0-9_-]{3,50}$/.test(first)) return { sessionId: first, mode: 'editor' };
+            return null;
+        }
+        if (parts.length === 2) {
+            const sid = first;
+            const sub = parts[1].toLowerCase();
+            if (!/^[a-zA-Z0-9_-]{3,50}$/.test(sid)) return null;
+            if (PUBLISH_SUFFIXES.has(sub)) return { sessionId: sid, mode: 'publish', publishPath: sub };
+            return null;
+        }
         return null;
+    }
+
+    function pickHtmlForPublish(sessionData) {
+        const files = sessionData.files || [];
+        if (!files.length) return null;
+        const norm = (n) => String(n || '').toLowerCase().replace(/\\/g, '/');
+        const indexNames = new Set(['index.html', 'index.htm', 'index.xhtml', 'default.html', 'default.htm']);
+        let hit = files.find((f) => {
+            const n = norm(f.name);
+            const base = n.includes('/') ? n.slice(n.lastIndexOf('/') + 1) : n;
+            return indexNames.has(base) || n.endsWith('/index.html') || n.endsWith('/index.htm');
+        });
+        if (!hit) {
+            hit = files.find((f) => {
+                const n = norm(f.name);
+                return n.endsWith('.html') || n.endsWith('.htm') || n.endsWith('.xhtml');
+            });
+        }
+        return hit || null;
+    }
+
+    function revokePublishBlob() {
+        if (publishBlobUrl) {
+            URL.revokeObjectURL(publishBlobUrl);
+            publishBlobUrl = null;
+        }
+    }
+
+    const DEFAULT_DOC_TITLE = 'CodeMesh — Real-time Collaborative Code Editor';
+
+    function setDocumentTitle(t) {
+        document.title = t || DEFAULT_DOC_TITLE;
+    }
+
+    async function openPublish(sessionId, publishPath) {
+        const seg = publishPath && PUBLISH_SUFFIXES.has(publishPath) ? publishPath : 'web';
+        showView('publish');
+        const wrap = document.getElementById('publish-frame-wrap');
+        const empty = document.getElementById('publish-empty');
+        const iframe = document.getElementById('publish-frame');
+        const label = document.getElementById('publish-session-label');
+        const pv = document.getElementById('publish-view');
+        revokePublishBlob();
+        if (pv) pv.dataset.sessionId = sessionId;
+        if (label) label.textContent = sessionId;
+        setDocumentTitle(`Preview · ${sessionId} · CodeMesh`);
+        if (wrap) wrap.style.display = 'none';
+        if (empty) empty.style.display = 'none';
+        if (iframe) {
+            iframe.removeAttribute('src');
+        }
+
+        try {
+            const sessionData = await api('/sessions/join-or-create', {
+                method: 'POST',
+                body: JSON.stringify({ sessionId, title: sessionId })
+            });
+            const file = pickHtmlForPublish(sessionData);
+            if (!file || !String(file.content || '').trim()) {
+                if (wrap) wrap.style.display = 'none';
+                if (empty) empty.style.display = '';
+                const canon = '/' + sessionId + '/' + seg;
+                if (window.location.pathname !== canon) {
+                    history.replaceState({ sessionId, publish: true }, '', canon);
+                }
+                return;
+            }
+            const blob = new Blob([file.content], { type: 'text/html;charset=utf-8' });
+            publishBlobUrl = URL.createObjectURL(blob);
+            if (iframe) iframe.src = publishBlobUrl;
+            if (wrap) wrap.style.display = '';
+            if (empty) empty.style.display = 'none';
+            const canon = '/' + sessionId + '/' + seg;
+            if (window.location.pathname !== canon) {
+                history.replaceState({ sessionId, publish: true }, '', canon);
+            }
+        } catch (err) {
+            setDocumentTitle(DEFAULT_DOC_TITLE);
+            showToast(err.message || 'Could not load preview', 'error');
+            history.replaceState({}, '', '/');
+            loadDashboard();
+        }
+    }
+
+    function initPublishViewControls() {
+        const pv = document.getElementById('publish-view');
+        if (!pv || pv.dataset.bound === '1') return;
+        pv.dataset.bound = '1';
+        window.addEventListener('pagehide', revokePublishBlob);
+        document.getElementById('publish-open-editor')?.addEventListener('click', () => {
+            const sid = document.getElementById('publish-view')?.dataset.sessionId;
+            if (sid) window.location.href = '/' + sid;
+        });
+        document.getElementById('publish-empty-open-editor')?.addEventListener('click', () => {
+            const sid = document.getElementById('publish-view')?.dataset.sessionId;
+            if (sid) window.location.href = '/' + sid;
+        });
+        document.getElementById('publish-copy-url')?.addEventListener('click', () => {
+            const sid = document.getElementById('publish-view')?.dataset.sessionId;
+            if (!sid) return;
+            const sub = window.location.pathname.split('/').filter(Boolean)[1] || 'web';
+            const url = `${window.location.origin}/${sid}/${PUBLISH_SUFFIXES.has(sub.toLowerCase()) ? sub.toLowerCase() : 'web'}`;
+            navigator.clipboard.writeText(url).then(() => showToast('Page link copied', 'success')).catch(() => {
+                const input = document.createElement('input');
+                input.value = url;
+                document.body.appendChild(input);
+                input.select();
+                document.execCommand('copy');
+                input.remove();
+                showToast('Page link copied', 'success');
+            });
+        });
+    }
+
+    async function importGitHubIntoCurrentSession() {
+        if (!state.currentSession) {
+            showToast('Open a session first', 'error');
+            return;
+        }
+        const raw = window.prompt('Public GitHub repo as owner/name (e.g. octocat/Hello-World):', '');
+        if (!raw || !raw.trim()) return;
+        const repo = raw.trim().replace(/^\/+|\/+$/g, '');
+        if (!/^[\w.-]+\/[\w.-]+$/.test(repo)) {
+            showToast('Use exactly owner/repo (letters, numbers, . _ -)', 'error');
+            return;
+        }
+        const branchRaw = window.prompt('Branch (leave empty for repo default):', '');
+        try {
+            const result = await api(`/sessions/${state.currentSession}/import-github`, {
+                method: 'POST',
+                body: JSON.stringify({
+                    repo,
+                    branch: branchRaw && branchRaw.trim() ? branchRaw.trim() : undefined
+                })
+            });
+            showToast(result.message + ' — open the session again from the dashboard to load new files.', 'success');
+        } catch (err) {
+            showToast(err.message || 'Import failed', 'error');
+        }
     }
 
     async function ensureGuestIfNeeded() {
@@ -360,6 +517,7 @@
 
     // ─── Dashboard ───
     async function loadDashboard() {
+        setDocumentTitle(DEFAULT_DOC_TITLE);
         showView('dashboard');
         document.getElementById('nav-username').textContent = state.user ? state.user.username : 'Guest';
 
@@ -488,21 +646,37 @@
 
     async function loadMonaco() {
         if (monacoLoaded) return;
-        if (monacoLoadingPromise) return monacoLoadingPromise;
-        
-        monacoLoadingPromise = new Promise((resolve) => {
-            if (window.monaco && window.monaco.editor) {
-                monacoLoaded = true;
-                resolve();
-                return;
-            }
-            require.config({ paths: { 'vs': 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.44.0/min/vs' }});
-            require(['vs/editor/editor.main'], function() {
-                monacoLoaded = true;
-                resolve();
+        if (!monacoLoadingPromise) {
+            monacoLoadingPromise = new Promise((resolve, reject) => {
+                if (window.monaco && window.monaco.editor) {
+                    monacoLoaded = true;
+                    resolve();
+                    return;
+                }
+                function startMain() {
+                    require.config({ paths: { 'vs': 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.44.0/min/vs' } });
+                    require(['vs/editor/editor.main'], function () {
+                        monacoLoaded = true;
+                        resolve();
+                    }, (e) => reject(e || new Error('Monaco failed to load')));
+                }
+                if (typeof require !== 'undefined' && typeof require.config === 'function') {
+                    startMain();
+                    return;
+                }
+                const script = document.createElement('script');
+                script.src = 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.44.0/min/vs/loader.min.js';
+                script.onload = startMain;
+                script.onerror = () => reject(new Error('Failed to load Monaco loader'));
+                document.head.appendChild(script);
+            }).finally(() => {
+                monacoLoadingPromise = null;
             });
-        });
-        return monacoLoadingPromise;
+        }
+        await monacoLoadingPromise;
+        if (!monacoLoaded) {
+            throw new Error('Monaco editor failed to initialize');
+        }
     }
 
     function mapLanguageToMonaco(lang) {
@@ -838,7 +1012,8 @@
             // Update UI
             document.getElementById('editor-session-title').textContent = sessionData.title;
             document.getElementById('editor-session-id').textContent = `${sessionId}`;
-            
+            setDocumentTitle(`${sessionData.title || sessionId} · CodeMesh`);
+
             const firstLang = (sessionData.files && sessionData.files.length > 0)
                 ? (sessionData.files[0].language || inferLanguageFromFileName(sessionData.files[0].name))
                 : (sessionData.language || 'javascript');
@@ -854,6 +1029,7 @@
             connectSocket(sessionId, sessionData);
 
         } catch (err) {
+            setDocumentTitle(DEFAULT_DOC_TITLE);
             showToast('Failed to open editor: ' + err.message, 'error');
             loadDashboard();
         }
@@ -1588,6 +1764,21 @@
             }
         });
 
+        document.getElementById('copy-publish-link')?.addEventListener('click', () => {
+            const id = state.currentSession;
+            if (!id) return;
+            const url = `${window.location.origin}/${id}/web`;
+            navigator.clipboard.writeText(url).then(() => showToast('Public /web preview link copied', 'success')).catch(() => {
+                const input = document.createElement('input');
+                input.value = url;
+                document.body.appendChild(input);
+                input.select();
+                document.execCommand('copy');
+                input.remove();
+                showToast('Preview link copied', 'success');
+            });
+        });
+
         document.getElementById('editor-session-id')?.addEventListener('click', () => {
             document.getElementById('copy-session-link').click();
         });
@@ -1642,6 +1833,7 @@
                 e.stopPropagation();
                 const action = item.dataset.action;
                 if (action === 'new-file') document.getElementById('create-file-action')?.click();
+                else if (action === 'import-github') importGitHubIntoCurrentSession();
                 else if (action === 'save') manualSave();
                 else if (action === 'undo' && state.editorView) state.editorView.trigger('keyboard', 'undo', null);
                 else if (action === 'redo' && state.editorView) state.editorView.trigger('keyboard', 'redo', null);
@@ -2139,6 +2331,7 @@
         initDashboard();
         initEditorToolbar();
         initAdminPanel();
+        initPublishViewControls();
 
         // Remove loading overlay; default to guest so share URLs and "New Session" work without login
         setTimeout(async () => {
@@ -2153,9 +2346,9 @@
                 return;
             }
 
-            const pathSession = getSessionIdFromPath();
+            const pathInfo = parseAppPath();
             const skipAutoGuest = sessionStorage.getItem('codemesh_explicit_logout') === '1';
-            if (!pathSession && skipAutoGuest) {
+            if (!pathInfo && skipAutoGuest) {
                 showView('auth');
                 initParticles();
                 return;
@@ -2170,13 +2363,17 @@
                 return;
             }
 
-            if (pathSession) {
-                await openEditor(pathSession);
+            if (pathInfo && pathInfo.mode === 'publish') {
+                await openPublish(pathInfo.sessionId, pathInfo.publishPath);
+                return;
+            }
+            if (pathInfo && pathInfo.mode === 'editor') {
+                await openEditor(pathInfo.sessionId);
                 return;
             }
 
             loadDashboard();
-        }, 800);
+        }, 220);
     }
 
     // Start app when DOM is ready

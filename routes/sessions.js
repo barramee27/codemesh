@@ -4,6 +4,7 @@ const { v4: uuidv4 } = require('uuid');
 const Session = require('../models/Session');
 const User = require('../models/User');
 const authMiddleware = require('../middleware/auth');
+const { fetchPublicRepoFiles } = require('../utils/githubImport');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'fallback_secret';
 
@@ -118,6 +119,58 @@ router.get('/', authMiddleware, async (req, res) => {
     } catch (err) {
         console.error('List sessions error:', err);
         res.status(500).json({ error: 'Failed to list sessions' });
+    }
+});
+
+// POST /api/sessions/:id/import-github — append files from a public GitHub repo (owner/repo)
+router.post('/:id/import-github', authMiddleware, async (req, res) => {
+    try {
+        const session = await Session.findOne({ sessionId: req.params.id });
+        if (!session) {
+            return res.status(404).json({ error: 'Session not found' });
+        }
+
+        const isOwner = session.owner.toString() === req.user.id;
+        const collab = session.collaborators.find((c) => c.user.toString() === req.user.id);
+        const canEdit = isOwner || (collab && collab.role === 'editor') || req.user.role === 'admin';
+        if (!canEdit) {
+            return res.status(403).json({ error: 'You need editor access to import files' });
+        }
+
+        const { repo, branch } = req.body;
+        if (!repo || typeof repo !== 'string') {
+            return res.status(400).json({ error: 'Body must include repo as "owner/name"' });
+        }
+
+        const { files: imported, truncated, branch: usedBranch } = await fetchPublicRepoFiles(repo, branch);
+        if (!imported.length) {
+            return res.status(400).json({
+                error: 'No suitable text files found (size/type limits), or repo is empty',
+                truncated
+            });
+        }
+
+        const existing = Array.isArray(session.files) ? [...session.files] : [];
+        session.files = existing.concat(imported);
+        session.updatedAt = Date.now();
+        await session.save();
+        await session.populate('owner', 'username');
+        await session.populate('collaborators.user', 'username');
+
+        res.json({
+            message: `Imported ${imported.length} file(s) from ${String(repo).trim()}@${usedBranch}`,
+            importedCount: imported.length,
+            truncated,
+            branch: usedBranch,
+            session
+        });
+    } catch (err) {
+        console.error('import-github error:', err.message);
+        let status = 400;
+        if (err.status === 404) status = 404;
+        else if (String(err.message || '').toLowerCase().includes('rate limit')) status = 429;
+        else if (typeof err.status === 'number' && err.status >= 400 && err.status < 500) status = err.status;
+        res.status(status).json({ error: err.message || 'GitHub import failed' });
     }
 });
 

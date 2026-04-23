@@ -19,16 +19,13 @@
 
   
 
-    <!-- Socket.IO Client -->
+    <link rel="dns-prefetch" href="https://cdnjs.cloudflare.com" />
+  <link rel="dns-prefetch" href="https://unpkg.com" />
+  <!-- Socket.IO Client -->
   <script src="/socket.io/socket.io.js"></script>
-  <!-- Monaco Editor Loader -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.44.0/min/vs/loader.min.js"></script>
-  
+  <!-- Monaco + xterm load on demand when you open the editor / terminal (faster dashboard) -->
   <!-- VS Code Icons -->
   <link href="https://unpkg.com/@vscode/codicons/dist/codicon.css" rel="stylesheet" />
-  <!-- xterm.js for integrated terminal -->
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/xterm/5.5.0/xterm.min.css" />
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/xterm/5.5.0/xterm.js"></script>
   <!-- Styles -->
   <link rel="stylesheet" href="/css/style.css">
 </head>
@@ -41,6 +38,26 @@
       <div class="loader-ring"></div>
       <div class="loader-ring"></div>
       <span class="loader-text">CodeMesh</span>
+    </div>
+  </div>
+
+  <!-- ═══════════════ PUBLISH / WEB PREVIEW (shareable, no Monaco) ═══════════════ -->
+  <div id="publish-view" class="view publish-view" style="display:none;">
+    <header class="publish-toolbar">
+      <a href="/" class="publish-brand">CodeMesh</a>
+      <span id="publish-session-label" class="publish-title"></span>
+      <div class="publish-actions">
+        <button type="button" class="btn btn-secondary btn-sm" id="publish-open-editor">Open in editor</button>
+        <button type="button" class="btn btn-ghost btn-sm" id="publish-copy-url">Copy page link</button>
+      </div>
+    </header>
+    <div id="publish-frame-wrap" class="publish-frame-wrap">
+      <iframe id="publish-frame" title="Site preview" sandbox="allow-scripts allow-forms" referrerpolicy="no-referrer"></iframe>
+    </div>
+    <div id="publish-empty" class="publish-empty" style="display:none;">
+      <p>No <code>index.html</code> or other <code>.html</code> file in the saved project yet.</p>
+      <p class="publish-hint">Save in the editor, then refresh this page. Self-contained HTML (inline CSS/JS) works best.</p>
+      <button type="button" class="btn btn-primary" id="publish-empty-open-editor">Open editor</button>
     </div>
   </div>
 
@@ -316,6 +333,7 @@
             </div>
             <p class="form-hint" style="font-size:0.85rem;color:var(--text-muted);margin:0 0 0.5rem;">
               Language is chosen from file extensions (e.g. <code>.cpp</code>, <code>.js</code>) when you add files in the editor.
+              Share a read-only HTML preview at <code>/your-session-id/web</code> after you add <code>index.html</code> and save.
             </p>
             <div class="modal-actions">
               <button type="button" class="btn btn-ghost" id="cancel-create-btn">Cancel</button>
@@ -352,9 +370,11 @@
           <i class="codicon codicon-vscode"></i>
         </div>
         <div class="vscode-menubar">
-          <div class="menubar-item" data-menu="file">File
+            <div class="menubar-item" data-menu="file">File
             <div class="menubar-dropdown">
               <div class="menubar-dropdown-item" data-action="new-file">New File</div>
+              <div class="menubar-dropdown-item" data-action="import-github">Import from GitHub…</div>
+              <div class="menubar-dropdown-divider"></div>
               <div class="menubar-dropdown-item" data-action="save">Save</div>
             </div>
           </div>
@@ -518,6 +538,9 @@
             </button>
             <button class="vscode-action-btn" id="copy-session-link" title="Copy Invite Link">
               <i class="codicon codicon-link"></i>
+            </button>
+            <button class="vscode-action-btn" id="copy-publish-link" title="Copy public /web preview link">
+              <i class="codicon codicon-browser"></i>
             </button>
             <button class="vscode-action-btn" title="More Actions...">
               <i class="codicon codicon-ellipsis"></i>

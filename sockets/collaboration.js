@@ -8,7 +8,11 @@ const activeSessions = new Map();
 const saveTimers = new Map();
 
 // ─── Performance constants ───
-const MAX_USERS_PER_SESSION = 50;
+const MAX_USERS_PER_SESSION = (() => {
+    const n = parseInt(process.env.MAX_USERS_PER_SESSION || '50', 10);
+    if (Number.isNaN(n)) return 50;
+    return Math.min(200, Math.max(1, n));
+})();
 const SAVE_DEBOUNCE_MS = 3000;
 const SESSION_CLEANUP_DELAY_MS = 5000;
 const SESSION_FINAL_CLEANUP_MS = 3000;

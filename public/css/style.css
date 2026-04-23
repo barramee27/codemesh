@@ -2042,3 +2042,80 @@ select.input-full {
   text-transform: uppercase;
   letter-spacing: 0.5px;
 }
+
+/* ─── Publish /web preview (lightweight, no Monaco) ─── */
+#publish-view.publish-view {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  background: var(--vscode-bg, #1e1e1e);
+  color: var(--vscode-fg, #ccc);
+}
+
+.publish-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 10px 16px;
+  background: var(--vscode-titlebar-bg, #3c3c3c);
+  border-bottom: 1px solid var(--vscode-border, #333);
+}
+
+.publish-brand {
+  font-weight: 600;
+  color: #a78bfa;
+  text-decoration: none;
+}
+
+.publish-brand:hover {
+  text-decoration: underline;
+}
+
+.publish-title {
+  flex: 1;
+  font-family: var(--font-mono, monospace);
+  font-size: 13px;
+  opacity: 0.9;
+}
+
+.publish-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.publish-frame-wrap {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
+.publish-frame-wrap iframe {
+  flex: 1;
+  width: 100%;
+  min-height: calc(100vh - 52px);
+  border: 0;
+  background: #fff;
+}
+
+.publish-empty {
+  padding: 48px 24px;
+  text-align: center;
+  max-width: 520px;
+  margin: 0 auto;
+}
+
+.publish-empty p {
+  margin: 0 0 12px;
+  line-height: 1.5;
+}
+
+.publish-hint {
+  font-size: 13px;
+  color: var(--text-muted, #888);
+}
+
+.publish-empty .btn {
+  margin-top: 16px;
+}

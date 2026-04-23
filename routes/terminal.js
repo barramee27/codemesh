@@ -4,8 +4,9 @@ const authMiddleware = require('../middleware/auth');
 
 const router = express.Router();
 
-// ─── Terminal: on by default; set DISABLE_TERMINAL=true to turn off (e.g. locked-down hosting) ───
-const TERMINAL_ENABLED = process.env.DISABLE_TERMINAL !== 'true';
+// ─── Terminal: on by default. Off if DISABLE_TERMINAL=true, or legacy ENABLE_TERMINAL=false ───
+const TERMINAL_ENABLED = process.env.DISABLE_TERMINAL !== 'true'
+    && process.env.ENABLE_TERMINAL !== 'false';
 
 const TIMEOUT_MS = 5000;
 // ─── Safe commands only (removed npm, npx, cat for security) ───
