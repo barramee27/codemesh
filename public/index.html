@@ -61,94 +61,161 @@
     </div>
   </div>
 
-  <!-- ═══════════════ CLASH / GRADER (CodinGame-style) ═══════════════ -->
-  <div id="clash-view" class="view clash-view" style="display:none;">
-    <header class="clash-toolbar">
-      <a href="/" class="clash-brand">CodeMesh</a>
-      <span id="clash-toolbar-title" class="clash-toolbar-title">Clash</span>
-      <div class="clash-toolbar-actions">
-        <a href="/clash" class="btn btn-ghost btn-sm" id="clash-hub-link">All clashes</a>
+  <!-- ═══════════════ CLASH (CodinGame Clash of Code–style UI) ═══════════════ -->
+  <div id="clash-view" class="view coc-view" style="display:none;">
+    <header class="coc-topbar">
+      <a href="/" class="coc-logo">CodeMesh</a>
+      <div class="coc-topbar-center">
+        <span id="clash-toolbar-title" class="coc-topbar-title">Clash of Code</span>
+        <span id="clash-live-subtitle" class="coc-live-subtitle" style="display:none;"></span>
+      </div>
+      <div class="coc-topbar-right">
+        <a href="/clash" class="coc-top-link" id="clash-hub-link">Clash home</a>
+        <button type="button" class="coc-btn-leave" id="clash-leave-room-btn" style="display:none">Leave clash</button>
       </div>
     </header>
-    <div id="clash-hub-panel" class="clash-panel" style="display:none;">
-      <h2 class="clash-heading">Clash</h2>
-      <p class="clash-muted">Private rooms like CodinGame Clash: invite link, lobby countdown, puzzle hidden until go-live. <strong>Registered accounts</strong> join and submit.</p>
-      <div class="clash-create card-like">
-        <h3>Create room</h3>
-        <div class="form-row clash-modes-row">
-          <label>Modes in pool (one is chosen at random for this room)</label>
-          <div class="clash-check-row">
-            <label><input type="checkbox" class="clash-mode-cb" value="fastest" checked> Fastest</label>
-            <label><input type="checkbox" class="clash-mode-cb" value="reverse" checked> Reverse</label>
-            <label><input type="checkbox" class="clash-mode-cb" value="shortest" checked> Shortest</label>
-          </div>
-        </div>
-        <div class="form-row">
-          <label><input type="checkbox" id="clash-lang-all" checked> All languages supported by the sandbox</label>
-        </div>
-        <div class="form-row">
-          <label>Puzzle source</label>
-          <select id="clash-source">
-            <option value="auto">Random: bank or new AI</option>
-            <option value="bank">Bank only (instant)</option>
-            <option value="ai">New AI only</option>
-          </select>
-        </div>
-        <div class="form-row">
-          <label>Topic (optional, AI path only)</label>
-          <input type="text" id="clash-create-topic" placeholder="e.g. strings, math" maxlength="200" />
-        </div>
-        <div class="form-row">
-          <label>Lobby countdown (minutes, then puzzle unlocks)</label>
-          <select id="clash-lobby-countdown">
-            <option value="1">1</option>
-            <option value="2">2</option>
-            <option value="3">3</option>
-            <option value="5" selected>5</option>
-            <option value="10">10</option>
-            <option value="15">15</option>
-          </select>
-        </div>
-        <div class="form-row">
-          <label>Match timer (after puzzle unlocks)</label>
-          <select id="clash-create-duration">
-            <option value="5">5 minutes</option>
-            <option value="10">10 minutes</option>
-            <option value="15" selected>15 minutes</option>
-            <option value="30">30 minutes</option>
-            <option value="60">60 minutes</option>
-          </select>
-        </div>
-        <button type="button" class="btn btn-primary" id="clash-create-btn">Create room</button>
-        <p id="clash-create-msg" class="clash-muted"></p>
-      </div>
-      <h3>Open clashes</h3>
-      <ul id="clash-list" class="clash-list"></ul>
+
+    <div id="clash-hub-panel" class="coc-hub" style="display:none;">
+      <section class="coc-hub-hero">
+        <p class="coc-hub-kicker">Multiplayer</p>
+        <h1 class="coc-hub-title">Private clash</h1>
+        <p class="coc-hub-desc">Same flow as CodinGame: pick modes, invite friends with a link, lobby countdown, puzzle stays hidden until go-live. <strong>Registered accounts</strong> only to join and submit.</p>
+        <button type="button" class="coc-btn-primary-lg" id="clash-open-create-modal">Start a private clash</button>
+      </section>
+      <section class="coc-hub-list-wrap">
+        <h2 class="coc-hub-list-title">Your recent rooms</h2>
+        <ul id="clash-list" class="coc-hub-list"></ul>
+      </section>
     </div>
-    <div id="clash-room-panel" class="clash-panel" style="display:none;">
-      <div id="clash-room-banner" class="clash-room-banner" style="display:none;"></div>
-      <div id="clash-lobby-bar" class="clash-lobby-bar" style="display:none;"></div>
-      <div id="clash-room-meta" class="clash-room-meta"></div>
-      <div class="clash-playground" id="clash-playground">
-        <div class="clash-pane clash-pane-problem">
-          <div id="clash-room-statement" class="clash-statement"></div>
-          <div id="clash-room-samples" class="clash-samples"></div>
-          <div id="clash-room-public-tests" class="clash-public-tests"></div>
+
+    <div id="clash-create-modal" class="coc-modal" style="display:none" aria-hidden="true">
+      <div class="coc-modal-backdrop" data-clash-modal-close tabindex="-1"></div>
+      <div class="coc-modal-card" role="dialog" aria-labelledby="clash-modal-heading">
+        <h2 id="clash-modal-heading" class="coc-modal-title">What type of clash would you like to play?</h2>
+        <p class="coc-modal-sub">One mode is picked at random from your selection when the room is created.</p>
+        <div class="coc-mode-cards">
+          <label class="coc-mode-card">
+            <input type="checkbox" class="clash-mode-cb" value="fastest" checked />
+            <span class="coc-mode-name">Fastest</span>
+            <span class="coc-mode-desc">Solve the puzzle as fast as possible.</span>
+          </label>
+          <label class="coc-mode-card">
+            <input type="checkbox" class="clash-mode-cb" value="reverse" checked />
+            <span class="coc-mode-name">Reverse</span>
+            <span class="coc-mode-desc">Guess the task from input / output samples.</span>
+          </label>
+          <label class="coc-mode-card">
+            <input type="checkbox" class="clash-mode-cb" value="shortest" checked />
+            <span class="coc-mode-name">Shortest</span>
+            <span class="coc-mode-desc">Shortest source code wins.</span>
+          </label>
         </div>
-        <div class="clash-pane clash-pane-editor">
-          <div id="clash-monaco-container" class="clash-monaco-container" style="display:none;"></div>
-          <div class="clash-editor-block" id="clash-editor-block">
-            <label>Language</label>
-            <select id="clash-lang-select"></select>
-            <label>Your code</label>
-            <textarea id="clash-code-input" spellcheck="false" rows="14"></textarea>
-            <button type="button" class="btn btn-primary" id="clash-submit-btn">Submit</button>
+        <label class="coc-field-label coc-check-all-lang">
+          <input type="checkbox" id="clash-lang-all" checked />
+          <span>All languages supported by the sandbox</span>
+        </label>
+        <label class="coc-field-label">Puzzle source</label>
+        <select id="clash-source" class="coc-select-wide">
+          <option value="auto">Random: bank or new AI</option>
+          <option value="bank">Bank only (instant)</option>
+          <option value="ai">New AI only</option>
+        </select>
+        <label class="coc-field-label">Topic <span class="coc-optional">(AI only, optional)</span></label>
+        <input type="text" id="clash-create-topic" class="coc-input-wide" placeholder="e.g. strings, graphs" maxlength="200" />
+        <div class="coc-field-row">
+          <div>
+            <label class="coc-field-label">Lobby countdown</label>
+            <select id="clash-lobby-countdown" class="coc-select-block">
+              <option value="1">1 min</option>
+              <option value="2">2 min</option>
+              <option value="3">3 min</option>
+              <option value="5" selected>5 min</option>
+              <option value="10">10 min</option>
+              <option value="15">15 min</option>
+            </select>
+          </div>
+          <div>
+            <label class="coc-field-label">Match timer</label>
+            <select id="clash-create-duration" class="coc-select-block">
+              <option value="5">5 min</option>
+              <option value="10">10 min</option>
+              <option value="15" selected>15 min</option>
+              <option value="30">30 min</option>
+              <option value="60">60 min</option>
+            </select>
           </div>
         </div>
+        <button type="button" class="coc-btn-lets-go" id="clash-create-btn">Let's start</button>
+        <p id="clash-create-msg" class="coc-modal-msg"></p>
+        <button type="button" class="coc-modal-cancel" data-clash-modal-close>Cancel</button>
       </div>
-      <div id="clash-result" class="clash-result" style="display:none;"></div>
-      <h3>Leaderboard</h3>
-      <div id="clash-leaderboard" class="clash-leaderboard"></div>
+    </div>
+
+    <div id="clash-room-panel" class="coc-room" style="display:none;">
+      <div id="clash-room-banner" class="coc-banner" style="display:none;"></div>
+      <div id="clash-room-meta" class="coc-meta-strip coc-room-meta-outer"></div>
+
+      <div id="clash-lobby-layout" class="coc-lobby-layout" style="display:none;">
+        <main class="coc-lobby-main">
+          <div class="coc-brand-block">
+            <div class="coc-coc-title" aria-hidden="true">CLASH <span>OF CODE</span></div>
+            <p class="coc-tagline">CodeMesh · private room</p>
+          </div>
+          <div id="clash-lobby-messages" class="coc-lobby-messages"></div>
+          <div class="coc-lobby-stats">
+            <div class="coc-stat"><span class="coc-stat-label">Players</span> <strong id="clash-lobby-player-count">0 / 50</strong></div>
+            <div class="coc-stat"><span class="coc-stat-label">Mode pool</span> <strong id="clash-lobby-modes">—</strong></div>
+            <div class="coc-stat"><span class="coc-stat-label">Languages</span> <strong id="clash-lobby-langs">All</strong></div>
+          </div>
+          <div class="coc-countdown-block">
+            <div id="clash-lobby-cd-label" class="coc-countdown-label">Clash starts in</div>
+            <div id="clash-lobby-cd" class="coc-countdown-digits">—:—</div>
+          </div>
+          <div id="clash-lobby-slots" class="coc-player-grid" aria-label="Players in lobby"></div>
+          <div id="clash-lobby-cta-row" class="coc-lobby-cta"></div>
+        </main>
+        <aside class="coc-lobby-aside">
+          <h3 class="coc-aside-title">Share this clash</h3>
+          <p class="coc-aside-muted">Send the link. Only registered players can join and submit.</p>
+          <div class="coc-share-row">
+            <input type="text" readonly id="clash-share-url-input" class="coc-share-input" value="" />
+            <button type="button" class="coc-btn-copy" id="clash-copy-invite-btn" title="Copy link">Copy</button>
+          </div>
+          <button type="button" class="coc-btn-join-wide" id="clash-join-btn">Join this clash</button>
+          <p id="clash-lobby-aside-note" class="coc-aside-note"></p>
+        </aside>
+      </div>
+
+      <div id="clash-playground" class="coc-ide-grid" style="display:none;">
+        <section class="coc-ide-cell coc-ide-problem">
+          <header class="coc-ide-cell-h">Statement &amp; tests</header>
+          <div class="coc-ide-scroll">
+            <div id="clash-room-statement" class="coc-statement"></div>
+            <div id="clash-room-samples"></div>
+            <div id="clash-room-public-tests"></div>
+          </div>
+        </section>
+        <section class="coc-ide-cell coc-ide-editor-pane">
+          <header class="coc-ide-cell-h coc-ide-editor-head">
+            <span>Code</span>
+            <select id="clash-lang-select" class="coc-lang-select"></select>
+          </header>
+          <div id="clash-monaco-container" class="coc-monaco" style="display:none"></div>
+          <div id="clash-editor-block" class="coc-editor-stack">
+            <textarea id="clash-code-input" class="coc-code-textarea" spellcheck="false" rows="16"></textarea>
+          </div>
+        </section>
+        <section class="coc-ide-cell coc-ide-leaderboard">
+          <header class="coc-ide-cell-h">Leaderboard</header>
+          <div id="clash-leaderboard" class="coc-lb-inner"></div>
+        </section>
+        <section class="coc-ide-cell coc-ide-submit">
+          <header class="coc-ide-cell-h">Actions</header>
+          <div id="clash-result" class="coc-submit-output" style="display:none"></div>
+          <p class="coc-submit-hint">Submit runs your program on all tests. Use the match timer in the bar above.</p>
+          <button type="button" id="clash-submit-btn" class="coc-btn-submit-big">Submit</button>
+        </section>
+      </div>
     </div>
   </div>
 
