@@ -1,5 +1,5 @@
 /**
- * Sandboxed program execution (shared by /api/run and grader).
+ * Sandboxed program execution (shared by /api/run and clash room judging).
  * Supports optional stdin per run; compile step unchanged.
  */
 

@@ -1,6 +1,5 @@
 /**
- * Pre-built Clash problems (bank). Picked at random when creating a room with source bank/auto.
- * Each template is validated shape: title, statement, samples[], tests[], allowedLanguages.
+ * Pre-built Clash of Code problems (bank). Used when source is bank or auto falls back to bank.
  */
 
 const TEMPLATES = {

@@ -1,8 +1,6 @@
 /**
- * Clash problem generation (Flash) + quality review (Pro) via Google Generative Language API.
- * Defaults follow Gemini 3 docs: https://ai.google.dev/gemini-api/docs/gemini-3
- * Env: GEMINI_API_KEY, GEMINI_MODEL_FLASH (default gemini-3-flash-preview), GEMINI_MODEL_PRO (default gemini-3.1-pro-preview),
- * optional GEMINI_MODEL (fallback if GEMINI_MODEL_FLASH unset), GEMINI_API_BASE.
+ * Clash room puzzle generation (Flash) + Pro review via Google Generative Language API.
+ * Env: GEMINI_API_KEY, GEMINI_MODEL_FLASH, GEMINI_MODEL_PRO, GEMINI_API_BASE.
  */
 
 const API_BASE = (process.env.GEMINI_API_BASE || 'https://generativelanguage.googleapis.com').replace(/\/$/, '');
@@ -64,7 +62,7 @@ async function callGeminiGenerateJson(modelId, bodyPayload) {
     return JSON.parse(stripped);
 }
 
-function validateAndNormalizeClash(obj, mode) {
+function validateAndNormalizeClashRoom(obj, mode) {
     if (!obj || typeof obj !== 'object') throw new Error('Invalid AI response: not an object');
     const title = String(obj.title || 'Untitled').slice(0, MAX_TITLE).trim();
     let statement = String(obj.statement || '');
@@ -100,7 +98,7 @@ function validateAndNormalizeClash(obj, mode) {
     return { title, statement, samples: normSamples, tests: normTests, allowedLanguages: allowed };
 }
 
-async function generateClash({ mode, topic, difficulty, languages, modelId }) {
+async function generateClashRoomProblem({ mode, topic, difficulty, languages, modelId }) {
     const model = modelId || flashModelId();
 
     const langHint = Array.isArray(languages) && languages.length
@@ -141,13 +139,10 @@ Return JSON only.`;
         }
     });
 
-    return validateAndNormalizeClash(parsed, mode);
+    return validateAndNormalizeClashRoom(parsed, mode);
 }
 
-/**
- * Second-pass review (intended for a Pro-class model). Runs after Flash generation; does not block the HTTP create handler.
- */
-async function verifyClashProblem({ mode, title, statement, samples, tests, modelId }) {
+async function verifyClashRoomProblem({ mode, title, statement, samples, tests, modelId }) {
     const model = modelId || proModelId();
     const payload = {
         mode,
@@ -192,9 +187,9 @@ Reply with ONLY valid JSON, one object: either {"approved": true} or {"approved"
 }
 
 module.exports = {
-    generateClash,
-    verifyClashProblem,
-    validateAndNormalizeClash,
+    generateClashRoomProblem,
+    verifyClashRoomProblem,
+    validateAndNormalizeClashRoom,
     flashModelId,
     proModelId,
     MAX_TESTS,

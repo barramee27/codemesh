@@ -834,7 +834,7 @@
       <div class="admin-tabs">
         <button class="admin-tab active" data-admin-tab="users" id="admin-tab-users">👥 Users</button>
         <button class="admin-tab" data-admin-tab="sessions" id="admin-tab-sessions">📄 Sessions</button>
-        <button class="admin-tab" data-admin-tab="clashes" id="admin-tab-clashes">⚔ Clashes</button>
+        <button class="admin-tab" data-admin-tab="clashrooms" id="admin-tab-clashrooms">⚔ Clash rooms</button>
         <button class="admin-tab" data-admin-tab="files" id="admin-tab-files">📁 Files</button>
       </div>
 
@@ -896,71 +896,36 @@
         </div>
       </div>
 
-      <!-- Clashes Panel -->
-      <div id="admin-clashes-panel" class="admin-panel" style="display:none;">
+      <!-- Clash rooms (moderation) -->
+      <div id="admin-clashrooms-panel" class="admin-panel" style="display:none;">
         <div class="admin-panel-header">
-          <h3>Clash grader</h3>
-          <span class="admin-count" id="admin-clash-count">0 clashes</span>
+          <h3>Clash of Code rooms</h3>
+          <span class="admin-count" id="admin-clashroom-count">0 rooms</span>
         </div>
-        <p class="clash-muted" style="margin:0 0 12px;">Batch uses the same pipeline as the hub: <strong>Flash</strong> generates each problem, then <strong>Pro</strong> reviews before save (up to 5 per request; can take several minutes).</p>
-        <div class="admin-batch-clash card-like" style="padding:16px;margin-bottom:20px;border:1px solid var(--vscode-border);border-radius:8px;">
-          <h4 style="margin:0 0 12px;">Batch create</h4>
-          <div class="form-row" style="margin-bottom:8px;">
-            <label>How many</label>
-            <select id="admin-clash-batch-count">
-              <option value="1">1</option>
-              <option value="2">2</option>
-              <option value="3">3</option>
-              <option value="4">4</option>
-              <option value="5">5</option>
-            </select>
-          </div>
-          <div class="form-row" style="margin-bottom:8px;">
-            <label>Mode</label>
-            <select id="admin-clash-batch-mode">
-              <option value="fastest">Fastest</option>
-              <option value="shortest">Shortest</option>
-              <option value="reverse">Reverse</option>
-            </select>
-          </div>
-          <div class="form-row" style="margin-bottom:8px;">
-            <label>Topic (optional)</label>
-            <input type="text" id="admin-clash-batch-topic" maxlength="200" placeholder="strings, graphs, …" style="width:100%;max-width:400px;" />
-          </div>
-          <div class="form-row" style="margin-bottom:8px;">
-            <label>Match timer (minutes)</label>
-            <select id="admin-clash-batch-duration">
-              <option value="5">5</option>
-              <option value="10">10</option>
-              <option value="15" selected>15</option>
-              <option value="30">30</option>
-              <option value="60">60</option>
-            </select>
-          </div>
-          <button type="button" class="btn btn-primary" id="admin-clash-batch-btn">Run batch (Flash + Pro each)</button>
-          <p id="admin-clash-batch-msg" class="clash-muted" style="margin-top:8px;"></p>
-        </div>
+        <p class="clash-muted" style="margin:0 0 12px;">List active and recent private rooms. Open <strong>All code</strong> to inspect submissions.</p>
         <div class="admin-table-wrap">
           <table class="admin-table">
             <thead>
               <tr>
                 <th>Slug</th>
-                <th>Title</th>
+                <th>Phase</th>
+                <th>Verify</th>
                 <th>Mode</th>
-                <th>Status</th>
+                <th>Host</th>
+                <th>Players</th>
                 <th>Created</th>
                 <th>Actions</th>
               </tr>
             </thead>
-            <tbody id="admin-clashes-tbody"></tbody>
+            <tbody id="admin-clashrooms-tbody"></tbody>
           </table>
         </div>
-        <div id="admin-clash-submissions-panel" class="admin-session-code-panel" style="display:none;">
+        <div id="admin-clashroom-submissions-panel" class="admin-session-code-panel" style="display:none;">
           <div class="admin-panel-header" style="margin:0;">
-            <h4 id="admin-clash-submissions-heading" style="margin:0;">Clash submissions</h4>
-            <button type="button" class="btn btn-secondary btn-sm" id="admin-clash-submissions-close">Close</button>
+            <h4 id="admin-clashroom-submissions-heading" style="margin:0;">Submissions</h4>
+            <button type="button" class="btn btn-secondary btn-sm" id="admin-clashroom-submissions-close">Close</button>
           </div>
-          <pre id="admin-clash-submissions-pre" class="admin-session-code-pre"></pre>
+          <pre id="admin-clashroom-submissions-pre" class="admin-session-code-pre"></pre>
         </div>
       </div>
 

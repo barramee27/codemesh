@@ -2389,13 +2389,13 @@
                 const target = tab.dataset.adminTab;
                 const usersPanel = document.getElementById('admin-users-panel');
                 const sessionsPanel = document.getElementById('admin-sessions-panel');
-                const clashesPanel = document.getElementById('admin-clashes-panel');
+                const clashroomsPanel = document.getElementById('admin-clashrooms-panel');
                 const filesPanel = document.getElementById('admin-files-panel');
                 if (usersPanel) usersPanel.style.display = target === 'users' ? '' : 'none';
                 if (sessionsPanel) sessionsPanel.style.display = target === 'sessions' ? '' : 'none';
-                if (clashesPanel) {
-                    clashesPanel.style.display = target === 'clashes' ? '' : 'none';
-                    if (target === 'clashes') loadAdminClashes();
+                if (clashroomsPanel) {
+                    clashroomsPanel.style.display = target === 'clashrooms' ? '' : 'none';
+                    if (target === 'clashrooms') loadAdminClashrooms();
                 }
                 if (filesPanel) {
                     filesPanel.style.display = target === 'files' ? '' : 'none';
@@ -2416,29 +2416,25 @@
             }
         });
 
-        document.getElementById('admin-clash-batch-btn')?.addEventListener('click', () => {
-            runAdminClashBatch();
-        });
-
-        document.getElementById('admin-clash-submissions-close')?.addEventListener('click', () => {
-            const p = document.getElementById('admin-clash-submissions-panel');
+        document.getElementById('admin-clashroom-submissions-close')?.addEventListener('click', () => {
+            const p = document.getElementById('admin-clashroom-submissions-panel');
             if (p) p.style.display = 'none';
         });
 
-        document.getElementById('admin-clashes-panel')?.addEventListener('click', async (e) => {
-            const subsBtn = e.target.closest('.admin-clash-subs-btn');
+        document.getElementById('admin-clashrooms-panel')?.addEventListener('click', async (e) => {
+            const subsBtn = e.target.closest('.admin-clashroom-subs-btn');
             if (subsBtn && subsBtn.dataset.slug) {
-                window._adminViewClashSubmissions(subsBtn.dataset.slug);
+                window._adminViewClashroomSubmissions(subsBtn.dataset.slug);
                 return;
             }
-            const delBtn = e.target.closest('.admin-delete-clash');
+            const delBtn = e.target.closest('.admin-delete-clashroom');
             if (delBtn && delBtn.dataset.slug) {
                 const slug = delBtn.getAttribute('data-slug');
-                if (!slug || !confirm('Delete clash ' + slug + ' and its submissions?')) return;
+                if (!slug || !confirm('Delete room ' + slug + ' and its submissions?')) return;
                 try {
-                    await api('/admin/clashes/' + encodeURIComponent(slug), { method: 'DELETE' });
-                    showToast('Clash deleted', 'success');
-                    loadAdminClashes();
+                    await api('/admin/clashrooms/' + encodeURIComponent(slug), { method: 'DELETE' });
+                    showToast('Room deleted', 'success');
+                    loadAdminClashrooms();
                 } catch (err) {
                     showToast(err.message, 'error');
                 }
@@ -2456,56 +2452,35 @@
 
     async function loadAdminPanel() {
         showView('admin');
-        await Promise.all([loadAdminUsers(), loadAdminSessions(), loadAdminClashes(), loadAdminFiles()]);
+        await Promise.all([loadAdminUsers(), loadAdminSessions(), loadAdminClashrooms(), loadAdminFiles()]);
     }
 
-    async function loadAdminClashes() {
-        const tbody = document.getElementById('admin-clashes-tbody');
-        const countEl = document.getElementById('admin-clash-count');
+    async function loadAdminClashrooms() {
+        const tbody = document.getElementById('admin-clashrooms-tbody');
+        const countEl = document.getElementById('admin-clashroom-count');
         if (!tbody) return;
         try {
-            const rows = await api('/admin/clashes');
-            if (countEl) countEl.textContent = `${rows.length} clashes`;
+            const rows = await api('/admin/clashrooms');
+            if (countEl) countEl.textContent = `${rows.length} rooms`;
             tbody.innerHTML = rows.length === 0
-                ? '<tr><td colspan="6" style="text-align:center;color:var(--text-muted);padding:24px;">No clashes</td></tr>'
+                ? '<tr><td colspan="8" style="text-align:center;color:var(--text-muted);padding:24px;">No clash rooms</td></tr>'
                 : rows.map((r) => `
                     <tr>
                         <td><code>${escapeHtml(r.slug)}</code></td>
-                        <td>${escapeHtml(r.title)}</td>
-                        <td>${escapeHtml(r.mode)}</td>
+                        <td>${escapeHtml(r.phase || '—')}</td>
                         <td>${escapeHtml(r.status || '—')}</td>
+                        <td>${escapeHtml(r.resolvedMode || '—')}</td>
+                        <td>${escapeHtml(r.host || '—')}</td>
+                        <td>${r.participantCount != null ? r.participantCount : '—'} / ${r.maxPlayers != null ? r.maxPlayers : ''}</td>
                         <td>${timeAgo(r.createdAt)}</td>
                         <td><div class="admin-actions">
-                            <button type="button" class="btn btn-secondary btn-sm admin-clash-subs-btn" data-slug="${escapeHtml(r.slug)}">All code</button>
-                            <button type="button" class="btn-delete admin-delete-clash" data-slug="${escapeHtml(r.slug)}">Delete</button>
+                            <button type="button" class="btn btn-secondary btn-sm admin-clashroom-subs-btn" data-slug="${escapeHtml(r.slug)}">All code</button>
+                            <button type="button" class="btn-delete admin-delete-clashroom" data-slug="${escapeHtml(r.slug)}">Delete</button>
                         </div></td>
                     </tr>`).join('');
         } catch (err) {
             if (countEl) countEl.textContent = '—';
-            tbody.innerHTML = '<tr><td colspan="6">Failed to load</td></tr>';
-        }
-    }
-
-    async function runAdminClashBatch() {
-        const msg = document.getElementById('admin-clash-batch-msg');
-        if (msg) msg.textContent = 'Running (Flash + Pro per item; may take several minutes)…';
-        try {
-            const count = document.getElementById('admin-clash-batch-count')?.value || '1';
-            const mode = document.getElementById('admin-clash-batch-mode')?.value || 'fastest';
-            const topic = document.getElementById('admin-clash-batch-topic')?.value || '';
-            const roomDurationMinutes = Number(document.getElementById('admin-clash-batch-duration')?.value) || 15;
-            const data = await api('/admin/clashes/batch', {
-                method: 'POST',
-                body: JSON.stringify({ count: parseInt(count, 10), mode, topic, roomDurationMinutes })
-            });
-            const ok = (data.created || []).length;
-            const bad = (data.failed || []).length;
-            if (msg) msg.textContent = `Created ${ok}, failed ${bad}. Flash: ${data.flashModel || ''} · Pro: ${data.proModel || ''}`;
-            showToast(`Batch done: ${ok} created`, ok ? 'success' : 'info');
-            loadAdminClashes();
-        } catch (err) {
-            if (msg) msg.textContent = err.message || 'Batch failed';
-            showToast(err.message || 'Batch failed', 'error');
+            tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--text-muted);padding:24px;">Failed to load</td></tr>';
         }
     }
 
@@ -2660,23 +2635,23 @@
         loadAdminFiles();
     }
 
-    window._adminViewClashSubmissions = async function (slug) {
-        const panel = document.getElementById('admin-clash-submissions-panel');
-        const pre = document.getElementById('admin-clash-submissions-pre');
-        const head = document.getElementById('admin-clash-submissions-heading');
+    window._adminViewClashroomSubmissions = async function (slug) {
+        const panel = document.getElementById('admin-clashroom-submissions-panel');
+        const pre = document.getElementById('admin-clashroom-submissions-pre');
+        const head = document.getElementById('admin-clashroom-submissions-heading');
         if (!panel || !pre) return;
         pre.textContent = 'Loading…';
         panel.style.display = '';
-        if (head) head.textContent = 'Clash submissions: ' + slug;
+        if (head) head.textContent = 'Submissions: ' + slug;
         try {
-            const data = await api('/admin/clashes/' + encodeURIComponent(slug) + '/submissions');
+            const data = await api('/admin/clashrooms/' + encodeURIComponent(slug) + '/submissions');
             const parts = [];
             parts.push(`# ${data.title || slug} (${data.slug})  mode=${data.mode || ''}  submissions=${data.count}`);
             (data.submissions || []).forEach((s, i) => {
                 parts.push('');
-                parts.push(`--- #${i + 1} ${s.createdAt ? new Date(s.createdAt).toISOString() : ''} ---`);
+                parts.push(`--- #${i + 1} ${s.bestAchievedAt ? new Date(s.bestAchievedAt).toISOString() : (s.lastAttemptAt ? new Date(s.lastAttemptAt).toISOString() : '')} ---`);
                 parts.push(`user: ${s.username} <${s.email || ''}>`);
-                parts.push(`language: ${s.language}  accepted: ${s.accepted}  chars: ${s.charCount}  totalTimeMs: ${s.totalTimeMs}`);
+                parts.push(`language: ${s.language}  accepted: ${s.accepted}  bytes: ${s.sourceByteLength}  totalTimeMs: ${s.totalTimeMs}`);
                 parts.push('');
                 parts.push(s.code || '(no code)');
             });
@@ -2840,12 +2815,12 @@
         if (!list) return;
         list.innerHTML = '<li class="coc-aside-muted">Loading…</li>';
         try {
-            const rows = await api('/grader/clashes');
+            const rows = await api('/clashrooms');
             list.innerHTML = rows.length
                 ? rows.map((r) => {
-                    const st = r.status ? escapeHtml(r.status) : 'live';
-                    const modeLabel = r.mode ? escapeHtml(r.mode) : '—';
-                    return `<li class="clash-li coc-hub-item"><a href="#" class="clash-open" data-slug="${escapeHtml(r.slug)}">${escapeHtml(r.title)}</a> <span class="coc-aside-muted">${modeLabel}</span> <span class="clash-badge clash-badge-sm">${st}</span></li>`;
+                    const st = escapeHtml(r.status || '—');
+                    const ph = escapeHtml(r.phase || '—');
+                    return `<li class="clash-li coc-hub-item"><a href="#" class="clash-open" data-slug="${escapeHtml(r.slug)}">${escapeHtml(r.slug)}</a> <span class="coc-aside-muted">${ph}</span> <span class="clash-badge clash-badge-sm">${st}</span></li>`;
                 }).join('')
                 : '<li class="coc-aside-muted">No rooms yet — start a private clash above.</li>';
             list.querySelectorAll('a.clash-open').forEach((a) => {
@@ -2859,7 +2834,7 @@
                 });
             });
         } catch (err) {
-            list.innerHTML = '<li class="coc-aside-muted">Could not load clashes.</li>';
+            list.innerHTML = '<li class="coc-aside-muted">Could not load rooms.</li>';
         }
     }
 
@@ -2876,12 +2851,15 @@
         const playground = document.getElementById('clash-playground');
         const shareInput = document.getElementById('clash-share-url-input');
         const liveSub = document.getElementById('clash-live-subtitle');
-        const status = c.status || 'live';
+        const phase = c.phase || '';
+        const status = c.status || 'ready';
         const ph = !!c.problemHidden;
-        const legacyLive = !c.status;
-        const problemVisible = !ph && (legacyLive || status === 'live' || status === 'ended');
+        const problemVisible = !ph;
+        const matchLive = phase === 'live';
+        const matchEnded = phase === 'ended';
+        const modeLabel = c.mode || c.resolvedMode || '';
 
-        const showLobby = !!(c.roomPhase && ['preparing', 'lobby', 'countdown'].includes(c.roomPhase));
+        const showLobby = ['preparing', 'lobby', 'countdown'].includes(phase);
         const inviteUrl = window.location.origin + clashRoomUrlPath(slug);
         if (shareInput) shareInput.value = inviteUrl;
 
@@ -2921,7 +2899,7 @@
                 }
                 const cdLabel = document.getElementById('clash-lobby-cd-label');
                 const cdDigits = document.getElementById('clash-lobby-cd');
-                if (c.roomPhase === 'countdown' && c.countdownEndsAt) {
+                if (phase === 'countdown' && c.countdownEndsAt) {
                     if (cdLabel) cdLabel.textContent = 'Clash starts in';
                     const startSec = c.countdownSecondsRemaining != null ? c.countdownSecondsRemaining : 0;
                     if (cdDigits) cdDigits.textContent = formatClashCountdown(startSec);
@@ -2962,22 +2940,13 @@
             } else {
                 banner.style.display = '';
                 let inner = '';
-                if (status === 'verifying' && !c.roomPhase) {
-                    inner = `<p class="coc-aside-muted">${escapeHtml(c.message || 'Pro model is reviewing…')}</p>`;
-                } else if (status === 'rejected') {
-                    inner = `<p class="clash-bad">Rejected.</p><p class="coc-aside-muted">${escapeHtml(c.verificationReason || '')}</p>`;
-                } else if (status === 'ready' && !c.roomPhase) {
-                    inner = `<p class="coc-aside-muted">${escapeHtml(c.message || '')}</p>`;
-                    if (c.canStart) {
-                        inner += `<p><button type="button" class="coc-btn-start-countdown" id="clash-start-btn">Start (${Math.round((c.roomDurationMs || 900000) / 60000)} min match)</button></p>`;
-                    }
-                } else if (status === 'live' && !c.endsAt) {
-                    banner.style.display = 'none';
-                } else if (status === 'live') {
+                if (matchEnded) {
+                    inner = '<p class="coc-aside-muted">Match ended — leaderboard is below; submissions are closed.</p>';
+                } else if (matchLive && c.endsAt) {
                     const left = typeof c.secondsRemaining === 'number' ? c.secondsRemaining : null;
                     inner = `<div class="coc-banner-live-row"><span class="clash-ok">Match live</span><span class="coc-aside-muted">Time left</span> <span id="clash-countdown-display" class="coc-live-timer">${left != null ? formatClashCountdown(left) : '—'}</span></div>`;
-                } else if (status === 'ended') {
-                    inner = '<p class="coc-aside-muted">Match ended — leaderboard is below; submissions are closed.</p>';
+                } else if (matchLive && !c.endsAt) {
+                    banner.style.display = 'none';
                 } else {
                     banner.style.display = 'none';
                 }
@@ -2991,17 +2960,17 @@
             meta.style.display = showLobby ? 'none' : '';
             if (!showLobby) {
                 if (ph) {
-                    meta.innerHTML = `<span class="clash-badge">${escapeHtml(c.roomPhase || '')}</span> <span class="coc-aside-muted">Private room</span> <code>${escapeHtml(slug)}</code> <span class="clash-badge">${escapeHtml(status)}</span>`;
+                    meta.innerHTML = `<span class="clash-badge">${escapeHtml(phase)}</span> <span class="coc-aside-muted">Private room</span> <code>${escapeHtml(slug)}</code> <span class="clash-badge">${escapeHtml(status)}</span>`;
                 } else {
-                    meta.innerHTML = `<span class="clash-badge">${escapeHtml(c.mode)}</span> <span class="coc-aside-muted">${escapeHtml(c.title)}</span> <span class="clash-badge">${escapeHtml(status)}</span>`;
+                    meta.innerHTML = `<span class="clash-badge">${escapeHtml(modeLabel)}</span> <span class="coc-aside-muted">${escapeHtml(c.title || '')}</span> <span class="clash-badge">${escapeHtml(phase)}</span> <span class="clash-badge">${escapeHtml(status)}</span>`;
                 }
             }
         }
 
         if (liveSub) {
-            if (problemVisible && status === 'live' && c.mode) {
+            if (problemVisible && matchLive && modeLabel) {
                 liveSub.style.display = '';
-                liveSub.textContent = `${c.title || 'Clash'} · ${c.mode}`;
+                liveSub.textContent = `${c.title || 'Clash'} · ${modeLabel}`;
             } else {
                 liveSub.style.display = 'none';
                 liveSub.textContent = '';
@@ -3050,9 +3019,9 @@
             }
         }
 
-        const canEdit = status === 'live' && (c.secondsRemaining == null || c.secondsRemaining > 0);
+        const canEdit = matchLive && (c.secondsRemaining == null || c.secondsRemaining > 0);
         if (editorBlock) {
-            editorBlock.style.display = (status === 'live' || status === 'ended' || legacyLive) ? '' : 'none';
+            editorBlock.style.display = (matchLive || matchEnded) ? '' : 'none';
         }
         if (submitBtn) {
             submitBtn.style.display = canEdit ? '' : 'none';
@@ -3064,7 +3033,7 @@
             disposeClashMonaco();
         }
 
-        if (status === 'live' && c.endsAt) {
+        if (matchLive && c.endsAt) {
             if (clashTickInterval) clearInterval(clashTickInterval);
             const endsMs = new Date(c.endsAt).getTime();
             clashTickInterval = setInterval(() => {
@@ -3107,38 +3076,36 @@
             result.innerHTML = '';
         }
         try {
-            const c = await api('/grader/clashes/' + encodeURIComponent(slug));
+            const c = await api('/clashrooms/' + encodeURIComponent(slug));
             applyClashRoomPayload(slug, c);
 
             function clashPayloadNeedsPoll(payload) {
                 if (!payload || payload.status === 'rejected') return false;
                 if (payload.status === 'verifying') return true;
-                const rp = payload.roomPhase || '';
-                if (payload.problemHidden && ['preparing', 'lobby', 'countdown'].includes(rp)) return true;
+                const phs = payload.phase || '';
+                if (payload.problemHidden && ['preparing', 'lobby', 'countdown'].includes(phs)) return true;
                 return false;
             }
 
             if (clashPayloadNeedsPoll(c)) {
-                let prevSnap = { status: c.status, problemHidden: !!c.problemHidden, roomPhase: c.roomPhase || '' };
+                let prevSnap = { status: c.status, problemHidden: !!c.problemHidden, phase: c.phase || '' };
                 clashPollInterval = setInterval(async () => {
                     if (currentClashSlug !== slug) return;
                     try {
-                        const c2 = await api('/grader/clashes/' + encodeURIComponent(slug));
+                        const c2 = await api('/clashrooms/' + encodeURIComponent(slug));
                         applyClashRoomPayload(slug, c2);
                         if (!clashPayloadNeedsPoll(c2)) {
                             clearInterval(clashPollInterval);
                             clashPollInterval = null;
                             if (c2.status === 'rejected') {
-                                showToast('Clash did not pass review', 'error');
-                            } else if (prevSnap.status === 'verifying' && c2.status === 'ready' && c2.isOwner && c2.roomPhase === 'lobby') {
+                                showToast('Room did not pass review', 'error');
+                            } else if (prevSnap.status === 'verifying' && c2.status === 'ready' && c2.isOwner && c2.phase === 'lobby') {
                                 showToast('Puzzle validated — invite players, then start the countdown.', 'success');
-                            } else if (prevSnap.status === 'verifying' && c2.status === 'ready' && c2.isOwner && !c2.roomPhase) {
-                                showToast('Review passed — start the match when you are ready.', 'success');
-                            } else if (prevSnap.problemHidden && !c2.problemHidden && c2.status === 'live') {
+                            } else if (prevSnap.problemHidden && !c2.problemHidden && c2.phase === 'live') {
                                 showToast('Match is live — puzzle unlocked.', 'success');
                             }
                         }
-                        prevSnap = { status: c2.status, problemHidden: !!c2.problemHidden, roomPhase: c2.roomPhase || '' };
+                        prevSnap = { status: c2.status, problemHidden: !!c2.problemHidden, phase: c2.phase || '' };
                     } catch (_) { /* keep polling */ }
                 }, 2500);
             }
@@ -3155,10 +3122,10 @@
         const slug = currentClashSlug;
         if (!slug) return;
         try {
-            const body = await api('/grader/clashes/' + encodeURIComponent(slug) + '/start', { method: 'POST' });
+            const body = await api('/clashrooms/' + encodeURIComponent(slug) + '/start', { method: 'POST' });
             const msg = body && body.message
                 ? body.message
-                : (body && body.roomPhase === 'countdown' ? 'Countdown started.' : 'Match started.');
+                : (body && body.phase === 'countdown' ? 'Countdown started.' : 'Match started.');
             showToast(msg, 'success');
             await openClashRoom(slug);
         } catch (err) {
@@ -3170,7 +3137,7 @@
         const el = document.getElementById('clash-leaderboard');
         if (!el) return;
         try {
-            const data = await api('/grader/clashes/' + encodeURIComponent(slug) + '/leaderboard');
+            const data = await api('/clashrooms/' + encodeURIComponent(slug) + '/leaderboard');
             const rows = data.leaderboard || [];
             el.innerHTML = rows.length
                 ? '<table class="clash-table"><thead><tr><th>#</th><th>User</th><th>Time ms</th><th>Chars</th><th>Lang</th></tr></thead><tbody>'
@@ -3198,7 +3165,7 @@
             const topic = document.getElementById('clash-create-topic')?.value || '';
             const lobbyCountdownMinutes = Number(document.getElementById('clash-lobby-countdown')?.value) || 5;
             const roomDurationMinutes = Number(document.getElementById('clash-create-duration')?.value) || 15;
-            const r = await api('/grader/clashes', {
+            const r = await api('/clashrooms', {
                 method: 'POST',
                 body: JSON.stringify({
                     allowedModes,
@@ -3235,7 +3202,7 @@
             return;
         }
         try {
-            const res = await api('/grader/clashes/' + encodeURIComponent(slug) + '/submit', {
+            const res = await api('/clashrooms/' + encodeURIComponent(slug) + '/submit', {
                 method: 'POST',
                 body: JSON.stringify({ language: lang, code })
             });
@@ -3267,7 +3234,7 @@
         const slug = currentClashSlug;
         if (!slug) return;
         try {
-            await api('/grader/clashes/' + encodeURIComponent(slug) + '/join', { method: 'POST', body: JSON.stringify({}) });
+            await api('/clashrooms/' + encodeURIComponent(slug) + '/join', { method: 'POST', body: JSON.stringify({}) });
             showToast('You joined the room', 'success');
             await openClashRoom(slug);
         } catch (err) {

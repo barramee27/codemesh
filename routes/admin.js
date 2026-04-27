@@ -2,32 +2,12 @@ const express = require('express');
 const path = require('path');
 const fs = require('fs');
 const multer = require('multer');
-const crypto = require('crypto');
 const User = require('../models/User');
 const Session = require('../models/Session');
-const Clash = require('../models/Clash');
-const ClashSubmission = require('../models/ClashSubmission');
+const ClashRoom = require('../models/ClashRoom');
+const ClashRoomSubmission = require('../models/ClashRoomSubmission');
 const authMiddleware = require('../middleware/auth');
 const adminAuth = require('../middleware/adminAuth');
-const { generateClash, verifyClashProblem, flashModelId, proModelId } = require('../utils/geminiClash');
-
-const ROOM_DURATION_PRESETS_MS = {
-    5: 5 * 60 * 1000,
-    10: 10 * 60 * 1000,
-    15: 15 * 60 * 1000,
-    30: 30 * 60 * 1000,
-    60: 60 * 60 * 1000
-};
-
-function makeClashSlug() {
-    return 'c' + crypto.randomBytes(4).toString('hex');
-}
-
-function resolveRoomDurationMs(body) {
-    const m = Number(body.roomDurationMinutes);
-    if (ROOM_DURATION_PRESETS_MS[m]) return ROOM_DURATION_PRESETS_MS[m];
-    return ROOM_DURATION_PRESETS_MS[15];
-}
 
 const router = express.Router();
 
@@ -266,105 +246,43 @@ router.get('/sessions/:sessionId/detail', async (req, res) => {
     }
 });
 
-// GET /api/admin/clashes — all clashes including verifying / rejected
-router.get('/clashes', async (req, res) => {
+// GET /api/admin/clashrooms — moderation list (no puzzle bulk in list)
+router.get('/clashrooms', async (req, res) => {
     try {
-        const rows = await Clash.find({})
+        const rows = await ClashRoom.find({})
             .sort({ createdAt: -1 })
             .limit(100)
             .populate('createdBy', 'username')
-            .select('slug mode title status createdAt roomDurationMs verificationReason')
+            .select('slug phase status resolvedMode createdAt maxPlayers participantIds sourceKind')
             .lean();
-        res.json(rows);
+        const out = rows.map((r) => ({
+            slug: r.slug,
+            phase: r.phase,
+            status: r.status,
+            resolvedMode: r.resolvedMode,
+            sourceKind: r.sourceKind,
+            host: r.createdBy && r.createdBy.username,
+            participantCount: (r.participantIds || []).length,
+            maxPlayers: r.maxPlayers,
+            createdAt: r.createdAt
+        }));
+        res.json(out);
     } catch (err) {
-        console.error('Admin list clashes error:', err);
-        res.status(500).json({ error: 'Failed to list clashes' });
+        console.error('Admin list clashrooms error:', err);
+        res.status(500).json({ error: 'Failed to list clash rooms' });
     }
 });
 
-// POST /api/admin/clashes/batch — Flash + Pro per item (sequential; max 5 per request)
-router.post('/clashes/batch', async (req, res) => {
+// GET /api/admin/clashrooms/:slug/submissions — full source for moderation
+router.get('/clashrooms/:slug/submissions', async (req, res) => {
     try {
-        const count = Math.min(5, Math.max(1, parseInt(req.body.count, 10) || 1));
-        const mode = req.body.mode;
-        if (!['reverse', 'fastest', 'shortest'].includes(mode)) {
-            return res.status(400).json({ error: 'mode must be reverse, fastest, or shortest' });
-        }
-        const topic = req.body.topic && String(req.body.topic).slice(0, 200);
-        const difficulty = req.body.difficulty && String(req.body.difficulty).slice(0, 50);
-        const roomDurationMs = resolveRoomDurationMs(req.body);
-        const timeLimitMs = Math.min(Number(req.body.timeLimitMs) || 8000, 15000);
-        const flashModel = flashModelId();
-        const proModel = proModelId();
-
-        const created = [];
-        const failed = [];
-
-        for (let i = 0; i < count; i++) {
-            try {
-                const payload = await generateClash({
-                    mode,
-                    topic,
-                    difficulty,
-                    languages: req.body.languages,
-                    modelId: flashModel
-                });
-                const verdict = await verifyClashProblem({
-                    mode,
-                    title: payload.title,
-                    statement: payload.statement,
-                    samples: payload.samples,
-                    tests: payload.tests,
-                    modelId: proModel
-                });
-                if (!verdict.approved) {
-                    failed.push({ index: i, error: verdict.reason || 'Pro rejected' });
-                    continue;
-                }
-                let slug = makeClashSlug();
-                for (let j = 0; j < 5; j++) {
-                    const exists = await Clash.findOne({ slug });
-                    if (!exists) break;
-                    slug = makeClashSlug();
-                }
-                const doc = await Clash.create({
-                    slug,
-                    mode,
-                    status: 'ready',
-                    title: payload.title,
-                    statement: payload.statement,
-                    samples: payload.samples,
-                    tests: payload.tests,
-                    allowedLanguages: payload.allowedLanguages,
-                    timeLimitMs,
-                    roomDurationMs,
-                    createdBy: req.user.id,
-                    aiModel: flashModel,
-                    aiReviewerModel: proModel
-                });
-                created.push({ slug: doc.slug, title: doc.title });
-            } catch (e) {
-                failed.push({ index: i, error: e.message || String(e) });
-            }
-        }
-
-        res.json({ created, failed, flashModel, proModel });
-    } catch (err) {
-        console.error('Admin batch clashes error:', err);
-        res.status(500).json({ error: err.message || 'Batch failed' });
-    }
-});
-
-// GET /api/admin/clashes/:slug/submissions — every submission with full source (admin only)
-router.get('/clashes/:slug/submissions', async (req, res) => {
-    try {
-        const clash = await Clash.findOne({ slug: req.params.slug }).select('_id slug title mode').lean();
-        if (!clash) return res.status(404).json({ error: 'Clash not found' });
+        const room = await ClashRoom.findOne({ slug: req.params.slug }).select('_id slug title resolvedMode').lean();
+        if (!room) return res.status(404).json({ error: 'Room not found' });
 
         const max = Math.min(300, Math.max(1, parseInt(req.query.limit, 10) || 200));
-        const subs = await ClashSubmission.find({ clashId: clash._id })
+        const subs = await ClashRoomSubmission.find({ roomId: room._id })
             .populate('userId', 'username email')
-            .sort({ createdAt: -1 })
+            .sort({ lastAttemptAt: -1 })
             .limit(max)
             .lean();
 
@@ -374,38 +292,38 @@ router.get('/clashes/:slug/submissions', async (req, res) => {
             email: (s.userId && s.userId.email) || '',
             language: s.language,
             accepted: s.accepted,
-            charCount: s.charCount,
+            sourceByteLength: s.sourceByteLength,
             totalTimeMs: s.totalTimeMs,
-            createdAt: s.createdAt,
+            bestAchievedAt: s.bestAchievedAt,
+            lastAttemptAt: s.lastAttemptAt,
             code: s.code || '',
-            testResults: s.testResults,
-            failures: s.failures
+            lastFailures: s.lastFailures
         }));
 
         res.json({
-            slug: clash.slug,
-            title: clash.title,
-            mode: clash.mode,
+            slug: room.slug,
+            title: room.title,
+            mode: room.resolvedMode,
             count: submissions.length,
             submissions
         });
     } catch (err) {
-        console.error('Admin clash submissions error:', err);
+        console.error('Admin clashroom submissions error:', err);
         res.status(500).json({ error: 'Failed to load submissions' });
     }
 });
 
-// DELETE /api/admin/clashes/:slug
-router.delete('/clashes/:slug', async (req, res) => {
+// DELETE /api/admin/clashrooms/:slug
+router.delete('/clashrooms/:slug', async (req, res) => {
     try {
-        const clash = await Clash.findOne({ slug: req.params.slug });
-        if (!clash) return res.status(404).json({ error: 'Clash not found' });
-        await ClashSubmission.deleteMany({ clashId: clash._id });
-        await Clash.deleteOne({ _id: clash._id });
-        res.json({ message: `Clash ${req.params.slug} deleted` });
+        const room = await ClashRoom.findOne({ slug: req.params.slug });
+        if (!room) return res.status(404).json({ error: 'Room not found' });
+        await ClashRoomSubmission.deleteMany({ roomId: room._id });
+        await ClashRoom.deleteOne({ _id: room._id });
+        res.json({ message: `Room ${req.params.slug} deleted` });
     } catch (err) {
-        console.error('Admin delete clash error:', err);
-        res.status(500).json({ error: 'Failed to delete clash' });
+        console.error('Admin delete clashroom error:', err);
+        res.status(500).json({ error: 'Failed to delete room' });
     }
 });
 
