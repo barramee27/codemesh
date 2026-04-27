@@ -72,23 +72,45 @@
     </header>
     <div id="clash-hub-panel" class="clash-panel" style="display:none;">
       <h2 class="clash-heading">Clash</h2>
-      <p class="clash-muted">AI-generated problems. Modes: reverse (guess from samples), fastest, shortest.</p>
+      <p class="clash-muted">Private rooms like CodinGame Clash: invite link, lobby countdown, puzzle hidden until go-live. <strong>Registered accounts</strong> join and submit.</p>
       <div class="clash-create card-like">
-        <h3>Create (uses Gemini)</h3>
+        <h3>Create room</h3>
+        <div class="form-row clash-modes-row">
+          <label>Modes in pool (one is chosen at random for this room)</label>
+          <div class="clash-check-row">
+            <label><input type="checkbox" class="clash-mode-cb" value="fastest" checked> Fastest</label>
+            <label><input type="checkbox" class="clash-mode-cb" value="reverse" checked> Reverse</label>
+            <label><input type="checkbox" class="clash-mode-cb" value="shortest" checked> Shortest</label>
+          </div>
+        </div>
         <div class="form-row">
-          <label>Mode</label>
-          <select id="clash-create-mode">
-            <option value="reverse">Reverse</option>
-            <option value="fastest">Fastest</option>
-            <option value="shortest">Shortest</option>
+          <label><input type="checkbox" id="clash-lang-all" checked> All languages supported by the sandbox</label>
+        </div>
+        <div class="form-row">
+          <label>Puzzle source</label>
+          <select id="clash-source">
+            <option value="auto">Random: bank or new AI</option>
+            <option value="bank">Bank only (instant)</option>
+            <option value="ai">New AI only</option>
           </select>
         </div>
         <div class="form-row">
-          <label>Topic (optional)</label>
+          <label>Topic (optional, AI path only)</label>
           <input type="text" id="clash-create-topic" placeholder="e.g. strings, math" maxlength="200" />
         </div>
         <div class="form-row">
-          <label>Match timer (after host clicks Start)</label>
+          <label>Lobby countdown (minutes, then puzzle unlocks)</label>
+          <select id="clash-lobby-countdown">
+            <option value="1">1</option>
+            <option value="2">2</option>
+            <option value="3">3</option>
+            <option value="5" selected>5</option>
+            <option value="10">10</option>
+            <option value="15">15</option>
+          </select>
+        </div>
+        <div class="form-row">
+          <label>Match timer (after puzzle unlocks)</label>
           <select id="clash-create-duration">
             <option value="5">5 minutes</option>
             <option value="10">10 minutes</option>
@@ -97,7 +119,7 @@
             <option value="60">60 minutes</option>
           </select>
         </div>
-        <button type="button" class="btn btn-primary" id="clash-create-btn">Create clash</button>
+        <button type="button" class="btn btn-primary" id="clash-create-btn">Create room</button>
         <p id="clash-create-msg" class="clash-muted"></p>
       </div>
       <h3>Open clashes</h3>
@@ -105,16 +127,24 @@
     </div>
     <div id="clash-room-panel" class="clash-panel" style="display:none;">
       <div id="clash-room-banner" class="clash-room-banner" style="display:none;"></div>
+      <div id="clash-lobby-bar" class="clash-lobby-bar" style="display:none;"></div>
       <div id="clash-room-meta" class="clash-room-meta"></div>
-      <div id="clash-room-statement" class="clash-statement"></div>
-      <div id="clash-room-samples" class="clash-samples"></div>
-      <div id="clash-room-public-tests" class="clash-public-tests"></div>
-      <div class="clash-editor-block" id="clash-editor-block">
-        <label>Language</label>
-        <select id="clash-lang-select"></select>
-        <label>Your code</label>
-        <textarea id="clash-code-input" spellcheck="false" rows="16"></textarea>
-        <button type="button" class="btn btn-primary" id="clash-submit-btn">Submit</button>
+      <div class="clash-playground" id="clash-playground">
+        <div class="clash-pane clash-pane-problem">
+          <div id="clash-room-statement" class="clash-statement"></div>
+          <div id="clash-room-samples" class="clash-samples"></div>
+          <div id="clash-room-public-tests" class="clash-public-tests"></div>
+        </div>
+        <div class="clash-pane clash-pane-editor">
+          <div id="clash-monaco-container" class="clash-monaco-container" style="display:none;"></div>
+          <div class="clash-editor-block" id="clash-editor-block">
+            <label>Language</label>
+            <select id="clash-lang-select"></select>
+            <label>Your code</label>
+            <textarea id="clash-code-input" spellcheck="false" rows="14"></textarea>
+            <button type="button" class="btn btn-primary" id="clash-submit-btn">Submit</button>
+          </div>
+        </div>
       </div>
       <div id="clash-result" class="clash-result" style="display:none;"></div>
       <h3>Leaderboard</h3>

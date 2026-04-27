@@ -40,6 +40,20 @@ const clashSchema = new mongoose.Schema({
     aiReviewerModel: { type: String },
     aiPromptVersion: { type: String, default: '2' },
     verificationReason: { type: String },
+    /** CodinGame-style room: preparing → lobby → countdown → live (mirrors match); ended when time up */
+    roomPhase: {
+        type: String,
+        enum: ['preparing', 'lobby', 'countdown', 'live', 'ended'],
+        index: true
+    },
+    /** Modes the host allowed at create time; actual `mode` is chosen at create (hidden until live). */
+    allowedModesPick: [{ type: String }],
+    languagesAll: { type: Boolean, default: false },
+    participantIds: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
+    maxPlayers: { type: Number, default: 50, min: 1, max: 50 },
+    countdownEndsAt: { type: Date },
+    countdownDurationMs: { type: Number, default: 300000 },
+    sourceKind: { type: String, enum: ['ai', 'bank'] },
     createdAt: { type: Date, default: Date.now },
     updatedAt: { type: Date, default: Date.now }
 });

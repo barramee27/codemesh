@@ -210,11 +210,16 @@ async function executeCodeWithStdin({ code, language, stdin, timeLimitMs = DEFAU
     }
 }
 
+function listRunnerLanguages() {
+    return Object.keys(RUNNERS);
+}
+
 module.exports = {
     RUNNERS,
     DEFAULT_TIMEOUT_MS,
     MAX_OUTPUT,
     runProcess,
     normalizeProgramOutput,
-    executeCodeWithStdin
+    executeCodeWithStdin,
+    listRunnerLanguages
 };

@@ -334,6 +334,8 @@
     let currentClashSlug = null;
     let clashPollInterval = null;
     let clashTickInterval = null;
+    let clashLobbyTickInterval = null;
+    let clashMonacoEditor = null;
 
     function isClashCodemeshHost() {
         return window.location.hostname.replace(/^www\./i, '') === 'clash.codemesh.org';
@@ -2735,6 +2737,53 @@
             clearInterval(clashTickInterval);
             clashTickInterval = null;
         }
+        if (clashLobbyTickInterval) {
+            clearInterval(clashLobbyTickInterval);
+            clashLobbyTickInterval = null;
+        }
+        disposeClashMonaco();
+    }
+
+    function disposeClashMonaco() {
+        if (clashMonacoEditor) {
+            try {
+                clashMonacoEditor.dispose();
+            } catch (_) { /* ignore */ }
+            clashMonacoEditor = null;
+        }
+        const mc = document.getElementById('clash-monaco-container');
+        const ta = document.getElementById('clash-code-input');
+        if (mc) {
+            mc.innerHTML = '';
+            mc.style.display = 'none';
+        }
+        if (ta) ta.style.display = '';
+    }
+
+    async function initClashMonacoLive() {
+        const container = document.getElementById('clash-monaco-container');
+        const ta = document.getElementById('clash-code-input');
+        if (!container || !ta) return;
+        try {
+            await loadMonaco();
+            disposeClashMonaco();
+            const lang = document.getElementById('clash-lang-select')?.value || 'python';
+            clashMonacoEditor = window.monaco.editor.create(container, {
+                value: ta.value || '',
+                language: mapLanguageToMonaco(lang),
+                theme: 'vs-dark',
+                automaticLayout: true,
+                minimap: { enabled: false },
+                wordWrap: 'on'
+            });
+            container.style.display = '';
+            ta.style.display = 'none';
+            clashMonacoEditor.onDidChangeModelContent(() => {
+                ta.value = clashMonacoEditor.getValue();
+            });
+        } catch (e) {
+            console.warn('Clash Monaco:', e);
+        }
     }
 
     function formatClashCountdown(totalSec) {
@@ -2769,9 +2818,10 @@
             list.innerHTML = rows.length
                 ? rows.map((r) => {
                     const st = r.status ? escapeHtml(r.status) : 'live';
-                    return `<li class="clash-li"><a href="#" class="clash-open" data-slug="${escapeHtml(r.slug)}">${escapeHtml(r.title)}</a> <span class="clash-muted">${escapeHtml(r.mode)}</span> <span class="clash-badge clash-badge-sm">${st}</span></li>`;
+                    const modeLabel = r.mode ? escapeHtml(r.mode) : '—';
+                    return `<li class="clash-li"><a href="#" class="clash-open" data-slug="${escapeHtml(r.slug)}">${escapeHtml(r.title)}</a> <span class="clash-muted">${modeLabel}</span> <span class="clash-badge clash-badge-sm">${st}</span></li>`;
                 }).join('')
-                : '<li class="clash-muted">No clashes yet. Create one below (needs GEMINI_API_KEY on server).</li>';
+                : '<li class="clash-muted">No clashes yet. Create a room below (bank puzzles work without an AI key).</li>';
             list.querySelectorAll('a.clash-open').forEach((a) => {
                 a.addEventListener('click', (e) => {
                     e.preventDefault();
@@ -2789,6 +2839,7 @@
 
     function applyClashRoomPayload(slug, c) {
         const banner = document.getElementById('clash-room-banner');
+        const lobby = document.getElementById('clash-lobby-bar');
         const meta = document.getElementById('clash-room-meta');
         const stEl = document.getElementById('clash-room-statement');
         const samples = document.getElementById('clash-room-samples');
@@ -2796,46 +2847,109 @@
         const langSel = document.getElementById('clash-lang-select');
         const editorBlock = document.getElementById('clash-editor-block');
         const submitBtn = document.getElementById('clash-submit-btn');
+        const playground = document.getElementById('clash-playground');
         const status = c.status || 'live';
+        const ph = !!c.problemHidden;
+        const legacyLive = !c.status;
+        const problemVisible = !ph && (legacyLive || status === 'live' || status === 'ended');
+
+        const showLobbyBar = !!(c.roomPhase && ['preparing', 'lobby', 'countdown'].includes(c.roomPhase));
+        if (lobby) {
+            if (showLobbyBar) {
+                if (clashLobbyTickInterval) {
+                    clearInterval(clashLobbyTickInterval);
+                    clashLobbyTickInterval = null;
+                }
+                lobby.style.display = '';
+                const inviteUrl = window.location.origin + clashRoomUrlPath(slug);
+                let h = `<p class="clash-muted">${escapeHtml(c.message || '')}</p>`;
+                h += `<p class="clash-muted">Players <strong>${c.participantCount || 0}</strong> / ${c.maxPlayers || 50} · <span class="clash-warn">Registered accounts only</span> to join & submit.</p>`;
+                if (c.allowedModesPick && c.allowedModesPick.length) {
+                    h += `<p class="clash-muted">Mode pool: <strong>${c.allowedModesPick.map((m) => escapeHtml(m)).join(', ')}</strong></p>`;
+                }
+                h += '<div class="clash-lobby-actions">';
+                h += `<button type="button" class="btn btn-secondary btn-sm" data-clash-invite="${escapeHtml(inviteUrl)}">Copy invite link</button>`;
+                h += '<button type="button" class="btn btn-secondary btn-sm" id="clash-join-btn">Join room</button>';
+                if (c.canStart) {
+                    h += '<button type="button" class="btn btn-primary" id="clash-start-btn">Start countdown</button>';
+                }
+                h += '</div>';
+                if (c.roomPhase === 'countdown' && c.countdownSecondsRemaining != null) {
+                    h += `<p class="clash-ok">Puzzle hidden · unlocks in <strong id="clash-lobby-cd">${formatClashCountdown(c.countdownSecondsRemaining)}</strong></p>`;
+                }
+                lobby.innerHTML = h;
+                if (c.roomPhase === 'countdown' && c.countdownEndsAt) {
+                    const endMs = new Date(c.countdownEndsAt).getTime();
+                    clashLobbyTickInterval = setInterval(() => {
+                        if (currentClashSlug !== slug) return;
+                        const left = Math.max(0, Math.floor((endMs - Date.now()) / 1000));
+                        const el = document.getElementById('clash-lobby-cd');
+                        if (el) el.textContent = formatClashCountdown(left);
+                        if (left <= 0) {
+                            clearInterval(clashLobbyTickInterval);
+                            clashLobbyTickInterval = null;
+                            openClashRoom(slug);
+                        }
+                    }, 1000);
+                }
+            } else {
+                lobby.style.display = 'none';
+                lobby.innerHTML = '';
+                if (clashLobbyTickInterval) {
+                    clearInterval(clashLobbyTickInterval);
+                    clashLobbyTickInterval = null;
+                }
+            }
+        }
 
         if (banner) {
-            banner.style.display = '';
-            let inner = '';
-            if (status === 'verifying') {
-                inner = `<p class="clash-muted">${escapeHtml(c.message || 'Pro model is reviewing this problem…')}</p>`;
-            } else if (status === 'rejected') {
-                inner = `<p class="clash-bad">Clash rejected after review.</p><p class="clash-muted">${escapeHtml(c.verificationReason || '')}</p>`;
-            } else if (status === 'ready') {
-                inner = `<p class="clash-muted">${escapeHtml(c.message || '')}</p>`;
-                if (c.canStart) {
-                    inner += `<p><button type="button" class="btn btn-primary" id="clash-start-btn">Start clash (begin ${Math.round((c.roomDurationMs || 900000) / 60000)} min timer)</button></p>`;
-                }
-            } else if (status === 'live' && !c.endsAt) {
+            if (showLobbyBar) {
                 banner.style.display = 'none';
-            } else if (status === 'live') {
-                const left = typeof c.secondsRemaining === 'number' ? c.secondsRemaining : null;
-                inner = `<p class="clash-ok">Clash is live.</p><p class="clash-muted">Time left: <strong id="clash-countdown-display">${left != null ? formatClashCountdown(left) : '—'}</strong></p>`;
-            } else if (status === 'ended') {
-                inner = '<p class="clash-muted">This clash has ended. You can still view the problem and leaderboard; new submissions are closed.</p>';
+                banner.innerHTML = '';
             } else {
-                banner.style.display = 'none';
-            }
-            if (banner.style.display !== 'none') {
-                banner.innerHTML = inner;
+                banner.style.display = '';
+                let inner = '';
+                if (status === 'verifying' && !c.roomPhase) {
+                    inner = `<p class="clash-muted">${escapeHtml(c.message || 'Pro model is reviewing…')}</p>`;
+                } else if (status === 'rejected') {
+                    inner = `<p class="clash-bad">Rejected.</p><p class="clash-muted">${escapeHtml(c.verificationReason || '')}</p>`;
+                } else if (status === 'ready' && !c.roomPhase) {
+                    inner = `<p class="clash-muted">${escapeHtml(c.message || '')}</p>`;
+                    if (c.canStart) {
+                        inner += `<p><button type="button" class="btn btn-primary" id="clash-start-btn">Start (${Math.round((c.roomDurationMs || 900000) / 60000)} min match)</button></p>`;
+                    }
+                } else if (status === 'live' && !c.endsAt) {
+                    banner.style.display = 'none';
+                } else if (status === 'live') {
+                    const left = typeof c.secondsRemaining === 'number' ? c.secondsRemaining : null;
+                    inner = `<p class="clash-ok">Match live</p><p class="clash-muted">Time left: <strong id="clash-countdown-display">${left != null ? formatClashCountdown(left) : '—'}</strong></p>`;
+                } else if (status === 'ended') {
+                    inner = '<p class="clash-muted">Match ended. Leaderboard below; submissions closed.</p>';
+                } else {
+                    banner.style.display = 'none';
+                }
+                if (banner.style.display !== 'none') {
+                    banner.innerHTML = inner;
+                }
             }
         }
 
         if (meta) {
-            meta.innerHTML = `<span class="clash-badge">${escapeHtml(c.mode)}</span> <span class="clash-muted">${escapeHtml(c.title)}</span> <span class="clash-badge">${escapeHtml(status)}</span>`;
+            if (ph) {
+                meta.innerHTML = `<span class="clash-badge">${escapeHtml(c.roomPhase || '')}</span> <span class="clash-muted">Private room</span> <code>${escapeHtml(slug)}</code> <span class="clash-badge">${escapeHtml(status)}</span>`;
+            } else {
+                meta.innerHTML = `<span class="clash-badge">${escapeHtml(c.mode)}</span> <span class="clash-muted">${escapeHtml(c.title)}</span> <span class="clash-badge">${escapeHtml(status)}</span>`;
+            }
         }
 
-        const legacyLive = !c.status;
-        const problemVisible = legacyLive || status === 'live' || status === 'ended';
+        if (playground) {
+            playground.style.display = problemVisible ? '' : 'none';
+        }
 
         if (stEl) {
             stEl.innerHTML = (problemVisible && c.statement)
                 ? `<div class="clash-md">${escapeHtml(c.statement).replace(/\n/g, '<br>')}</div>`
-                : (problemVisible ? '' : '<p class="clash-muted">Problem text unlocks when the host starts the clash.</p>');
+                : (problemVisible ? '' : '');
         }
         if (samples) {
             if (problemVisible && (c.samples || []).length) {
@@ -2855,7 +2969,19 @@
             }
         }
         if (langSel) {
-            langSel.innerHTML = (c.allowedLanguages || ['python']).map((l) => `<option value="${escapeHtml(l)}">${escapeHtml(l)}</option>`).join('');
+            const langs = c.allowedLanguages || ['python'];
+            const prevLang = langSel.value;
+            langSel.innerHTML = langs.map((l) => `<option value="${escapeHtml(l)}">${escapeHtml(l)}</option>`).join('');
+            const pick = langs.includes(prevLang) ? prevLang : langs[0];
+            if (pick) langSel.value = pick;
+            if (clashMonacoEditor && window.monaco) {
+                try {
+                    window.monaco.editor.setModelLanguage(
+                        clashMonacoEditor.getModel(),
+                        mapLanguageToMonaco(langSel.value)
+                    );
+                } catch (_) { /* ignore */ }
+            }
         }
 
         const canEdit = status === 'live' && (c.secondsRemaining == null || c.secondsRemaining > 0);
@@ -2864,6 +2990,12 @@
         }
         if (submitBtn) {
             submitBtn.style.display = canEdit ? '' : 'none';
+        }
+
+        if (problemVisible && canEdit) {
+            if (!clashMonacoEditor) initClashMonacoLive();
+        } else {
+            disposeClashMonaco();
         }
 
         if (status === 'live' && c.endsAt) {
@@ -2910,22 +3042,35 @@
             const c = await api('/grader/clashes/' + encodeURIComponent(slug));
             applyClashRoomPayload(slug, c);
 
-            if (c.status === 'verifying') {
+            function clashPayloadNeedsPoll(payload) {
+                if (!payload || payload.status === 'rejected') return false;
+                if (payload.status === 'verifying') return true;
+                const rp = payload.roomPhase || '';
+                if (payload.problemHidden && ['preparing', 'lobby', 'countdown'].includes(rp)) return true;
+                return false;
+            }
+
+            if (clashPayloadNeedsPoll(c)) {
+                let prevSnap = { status: c.status, problemHidden: !!c.problemHidden, roomPhase: c.roomPhase || '' };
                 clashPollInterval = setInterval(async () => {
                     if (currentClashSlug !== slug) return;
                     try {
                         const c2 = await api('/grader/clashes/' + encodeURIComponent(slug));
                         applyClashRoomPayload(slug, c2);
-                        if (c2.status !== 'verifying') {
+                        if (!clashPayloadNeedsPoll(c2)) {
                             clearInterval(clashPollInterval);
                             clashPollInterval = null;
-                            if (c2.status === 'ready' && c2.isOwner) {
-                                showToast('Review passed — click Start when you are ready', 'success');
-                            }
                             if (c2.status === 'rejected') {
                                 showToast('Clash did not pass review', 'error');
+                            } else if (prevSnap.status === 'verifying' && c2.status === 'ready' && c2.isOwner && c2.roomPhase === 'lobby') {
+                                showToast('Puzzle validated — invite players, then start the countdown.', 'success');
+                            } else if (prevSnap.status === 'verifying' && c2.status === 'ready' && c2.isOwner && !c2.roomPhase) {
+                                showToast('Review passed — start the match when you are ready.', 'success');
+                            } else if (prevSnap.problemHidden && !c2.problemHidden && c2.status === 'live') {
+                                showToast('Match is live — puzzle unlocked.', 'success');
                             }
                         }
+                        prevSnap = { status: c2.status, problemHidden: !!c2.problemHidden, roomPhase: c2.roomPhase || '' };
                     } catch (_) { /* keep polling */ }
                 }, 2500);
             }
@@ -2939,8 +3084,11 @@
         const slug = currentClashSlug;
         if (!slug) return;
         try {
-            await api('/grader/clashes/' + encodeURIComponent(slug) + '/start', { method: 'POST' });
-            showToast('Clash started', 'success');
+            const body = await api('/grader/clashes/' + encodeURIComponent(slug) + '/start', { method: 'POST' });
+            const msg = body && body.message
+                ? body.message
+                : (body && body.roomPhase === 'countdown' ? 'Countdown started.' : 'Match started.');
+            showToast(msg, 'success');
             await openClashRoom(slug);
         } catch (err) {
             showToast(err.message || 'Could not start', 'error');
@@ -2965,16 +3113,32 @@
 
     async function createClashFlow() {
         const msg = document.getElementById('clash-create-msg');
-        if (msg) msg.textContent = 'Creating with Flash… (Pro review runs next; this page will update).';
+        if (msg) msg.textContent = 'Creating room…';
         try {
-            const mode = document.getElementById('clash-create-mode')?.value || 'fastest';
+            const modeEls = document.querySelectorAll('.clash-mode-cb:checked');
+            const allowedModes = Array.from(modeEls).map((el) => el.value).filter(Boolean);
+            if (!allowedModes.length) {
+                if (msg) msg.textContent = 'Pick at least one mode.';
+                showToast('Select at least one clash mode', 'error');
+                return;
+            }
+            const languagesAll = !!document.getElementById('clash-lang-all')?.checked;
+            const source = document.getElementById('clash-source')?.value || 'auto';
             const topic = document.getElementById('clash-create-topic')?.value || '';
+            const lobbyCountdownMinutes = Number(document.getElementById('clash-lobby-countdown')?.value) || 5;
             const roomDurationMinutes = Number(document.getElementById('clash-create-duration')?.value) || 15;
             const r = await api('/grader/clashes', {
                 method: 'POST',
-                body: JSON.stringify({ mode, topic, roomDurationMinutes })
+                body: JSON.stringify({
+                    allowedModes,
+                    languagesAll,
+                    source,
+                    topic,
+                    lobbyCountdownMinutes,
+                    roomDurationMinutes
+                })
             });
-            if (msg) msg.textContent = 'Room ' + r.slug + ' — Flash done; Pro review in progress…';
+            if (msg) msg.textContent = r.message || ('Room ' + r.slug);
             history.pushState({}, '', clashRoomUrlPath(r.slug));
             await openClashRoom(r.slug);
         } catch (err) {
@@ -2987,7 +3151,13 @@
         const slug = currentClashSlug;
         if (!slug) return;
         const lang = document.getElementById('clash-lang-select')?.value;
-        const code = document.getElementById('clash-code-input')?.value || '';
+        const ta = document.getElementById('clash-code-input');
+        let code = (ta && ta.value) || '';
+        if (clashMonacoEditor) {
+            try {
+                code = clashMonacoEditor.getValue();
+            } catch (_) { /* use textarea */ }
+        }
         if (!code.trim()) {
             showToast('Paste your solution first', 'error');
             return;
@@ -3021,15 +3191,51 @@
         }
     }
 
+    async function joinClashRoom() {
+        const slug = currentClashSlug;
+        if (!slug) return;
+        try {
+            await api('/grader/clashes/' + encodeURIComponent(slug) + '/join', { method: 'POST', body: JSON.stringify({}) });
+            showToast('You joined the room', 'success');
+            await openClashRoom(slug);
+        } catch (err) {
+            showToast(err.message || 'Join failed — use a registered account', 'error');
+        }
+    }
+
     function initClashUi() {
         document.getElementById('clash-create-btn')?.addEventListener('click', () => { createClashFlow(); });
         document.getElementById('clash-submit-btn')?.addEventListener('click', () => { submitClash(); });
+        document.getElementById('clash-lang-select')?.addEventListener('change', () => {
+            if (!clashMonacoEditor || !window.monaco) return;
+            const v = document.getElementById('clash-lang-select')?.value;
+            if (!v) return;
+            try {
+                window.monaco.editor.setModelLanguage(clashMonacoEditor.getModel(), mapLanguageToMonaco(v));
+            } catch (_) { /* ignore */ }
+        });
         document.getElementById('clash-hub-link')?.addEventListener('click', (e) => {
             e.preventDefault();
             history.pushState({}, '', clashHubPath());
             openClashHub();
         });
         document.getElementById('clash-view')?.addEventListener('click', (e) => {
+            const inv = e.target && e.target.closest && e.target.closest('[data-clash-invite]');
+            if (inv) {
+                e.preventDefault();
+                const url = inv.getAttribute('data-clash-invite');
+                if (url && navigator.clipboard && navigator.clipboard.writeText) {
+                    navigator.clipboard.writeText(url).then(() => showToast('Invite link copied', 'success')).catch(() => showToast('Could not copy link', 'error'));
+                } else if (url) {
+                    showToast(url, 'info');
+                }
+                return;
+            }
+            if (e.target && e.target.id === 'clash-join-btn') {
+                e.preventDefault();
+                joinClashRoom();
+                return;
+            }
             if (e.target && e.target.id === 'clash-start-btn') {
                 e.preventDefault();
                 startClash();

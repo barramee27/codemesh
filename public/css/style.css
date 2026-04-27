@@ -2262,6 +2262,94 @@ select.input-full {
   text-transform: none;
 }
 
+#clash-room-panel.clash-panel {
+  max-width: 1280px;
+}
+
+.clash-room-meta {
+  margin-bottom: 12px;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.clash-room-meta code {
+  font-size: 12px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: var(--vscode-input-bg, #3c3c3c);
+}
+
+.clash-lobby-bar {
+  margin-bottom: 16px;
+  padding: 14px 16px;
+  border-radius: 8px;
+  border: 1px solid var(--vscode-border, #444);
+  background: var(--vscode-sidebar-bg, #252526);
+}
+
+.clash-lobby-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 12px 0 0;
+  align-items: center;
+}
+
+.clash-warn {
+  color: #fbbf24;
+}
+
+.clash-check-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px 20px;
+  margin-top: 6px;
+}
+
+.clash-check-row label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.clash-playground {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  align-items: stretch;
+  min-height: 380px;
+  margin-bottom: 20px;
+}
+
+@media (max-width: 900px) {
+  .clash-playground {
+    grid-template-columns: 1fr;
+  }
+}
+
+.clash-pane {
+  min-height: 200px;
+  padding: 12px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--vscode-border, #444);
+  background: var(--vscode-sidebar-bg, #252526);
+  overflow: auto;
+}
+
+.clash-pane-editor .clash-editor-block {
+  margin-top: 0;
+}
+
+.clash-monaco-container {
+  width: 100%;
+  min-height: 300px;
+  border: 1px solid var(--vscode-border, #444);
+  border-radius: 6px;
+  margin-bottom: 10px;
+}
+
 .clash-room-banner {
   margin-bottom: 16px;
   padding: 12px 14px;
