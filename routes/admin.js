@@ -229,6 +229,7 @@ router.get('/sessions/:sessionId/detail', async (req, res) => {
     try {
         const session = await Session.findOne({ sessionId: req.params.sessionId })
             .populate('owner', 'username email')
+            .populate('collaborators.user', 'username email')
             .lean();
         if (!session) return res.status(404).json({ error: 'Session not found' });
         const maxFileChars = 400000;
@@ -240,6 +241,12 @@ router.get('/sessions/:sessionId/detail', async (req, res) => {
                 ? f.content.slice(0, maxFileChars) + '\n… [truncated]'
                 : f.content
         }));
+        const collaborators = (session.collaborators || []).map((c) => ({
+            username: c.user && c.user.username,
+            email: c.user && c.user.email,
+            role: c.role
+        }));
+
         res.json({
             sessionId: session.sessionId,
             title: session.title,
@@ -248,6 +255,7 @@ router.get('/sessions/:sessionId/detail', async (req, res) => {
             files,
             comments: session.comments,
             owner: session.owner,
+            collaborators,
             isPublic: session.isPublic,
             createdAt: session.createdAt,
             updatedAt: session.updatedAt
@@ -344,6 +352,46 @@ router.post('/clashes/batch', async (req, res) => {
     } catch (err) {
         console.error('Admin batch clashes error:', err);
         res.status(500).json({ error: err.message || 'Batch failed' });
+    }
+});
+
+// GET /api/admin/clashes/:slug/submissions — every submission with full source (admin only)
+router.get('/clashes/:slug/submissions', async (req, res) => {
+    try {
+        const clash = await Clash.findOne({ slug: req.params.slug }).select('_id slug title mode').lean();
+        if (!clash) return res.status(404).json({ error: 'Clash not found' });
+
+        const max = Math.min(300, Math.max(1, parseInt(req.query.limit, 10) || 200));
+        const subs = await ClashSubmission.find({ clashId: clash._id })
+            .populate('userId', 'username email')
+            .sort({ createdAt: -1 })
+            .limit(max)
+            .lean();
+
+        const submissions = subs.map((s) => ({
+            id: s._id,
+            username: (s.userId && s.userId.username) || 'User',
+            email: (s.userId && s.userId.email) || '',
+            language: s.language,
+            accepted: s.accepted,
+            charCount: s.charCount,
+            totalTimeMs: s.totalTimeMs,
+            createdAt: s.createdAt,
+            code: s.code || '',
+            testResults: s.testResults,
+            failures: s.failures
+        }));
+
+        res.json({
+            slug: clash.slug,
+            title: clash.title,
+            mode: clash.mode,
+            count: submissions.length,
+            submissions
+        });
+    } catch (err) {
+        console.error('Admin clash submissions error:', err);
+        res.status(500).json({ error: 'Failed to load submissions' });
     }
 });
 

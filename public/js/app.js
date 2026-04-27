@@ -2418,6 +2418,31 @@
             runAdminClashBatch();
         });
 
+        document.getElementById('admin-clash-submissions-close')?.addEventListener('click', () => {
+            const p = document.getElementById('admin-clash-submissions-panel');
+            if (p) p.style.display = 'none';
+        });
+
+        document.getElementById('admin-clashes-panel')?.addEventListener('click', async (e) => {
+            const subsBtn = e.target.closest('.admin-clash-subs-btn');
+            if (subsBtn && subsBtn.dataset.slug) {
+                window._adminViewClashSubmissions(subsBtn.dataset.slug);
+                return;
+            }
+            const delBtn = e.target.closest('.admin-delete-clash');
+            if (delBtn && delBtn.dataset.slug) {
+                const slug = delBtn.getAttribute('data-slug');
+                if (!slug || !confirm('Delete clash ' + slug + ' and its submissions?')) return;
+                try {
+                    await api('/admin/clashes/' + encodeURIComponent(slug), { method: 'DELETE' });
+                    showToast('Clash deleted', 'success');
+                    loadAdminClashes();
+                } catch (err) {
+                    showToast(err.message, 'error');
+                }
+            }
+        });
+
         document.getElementById('admin-upload-btn')?.addEventListener('click', () => document.getElementById('admin-file-input')?.click());
         document.getElementById('admin-file-input')?.addEventListener('change', handleAdminFileUpload);
 
@@ -2448,21 +2473,11 @@
                         <td>${escapeHtml(r.mode)}</td>
                         <td>${escapeHtml(r.status || '—')}</td>
                         <td>${timeAgo(r.createdAt)}</td>
-                        <td><button type="button" class="btn-delete admin-delete-clash" data-slug="${escapeHtml(r.slug)}">Delete</button></td>
+                        <td><div class="admin-actions">
+                            <button type="button" class="btn btn-secondary btn-sm admin-clash-subs-btn" data-slug="${escapeHtml(r.slug)}">All code</button>
+                            <button type="button" class="btn-delete admin-delete-clash" data-slug="${escapeHtml(r.slug)}">Delete</button>
+                        </div></td>
                     </tr>`).join('');
-            tbody.querySelectorAll('.admin-delete-clash').forEach((btn) => {
-                btn.addEventListener('click', async () => {
-                    const slug = btn.getAttribute('data-slug');
-                    if (!slug || !confirm('Delete clash ' + slug + ' and its submissions?')) return;
-                    try {
-                        await api('/admin/clashes/' + encodeURIComponent(slug), { method: 'DELETE' });
-                        showToast('Clash deleted', 'success');
-                        loadAdminClashes();
-                    } catch (err) {
-                        showToast(err.message, 'error');
-                    }
-                });
-            });
         } catch (err) {
             if (countEl) countEl.textContent = '—';
             tbody.innerHTML = '<tr><td colspan="6">Failed to load</td></tr>';
@@ -2643,6 +2658,33 @@
         loadAdminFiles();
     }
 
+    window._adminViewClashSubmissions = async function (slug) {
+        const panel = document.getElementById('admin-clash-submissions-panel');
+        const pre = document.getElementById('admin-clash-submissions-pre');
+        const head = document.getElementById('admin-clash-submissions-heading');
+        if (!panel || !pre) return;
+        pre.textContent = 'Loading…';
+        panel.style.display = '';
+        if (head) head.textContent = 'Clash submissions: ' + slug;
+        try {
+            const data = await api('/admin/clashes/' + encodeURIComponent(slug) + '/submissions');
+            const parts = [];
+            parts.push(`# ${data.title || slug} (${data.slug})  mode=${data.mode || ''}  submissions=${data.count}`);
+            (data.submissions || []).forEach((s, i) => {
+                parts.push('');
+                parts.push(`--- #${i + 1} ${s.createdAt ? new Date(s.createdAt).toISOString() : ''} ---`);
+                parts.push(`user: ${s.username} <${s.email || ''}>`);
+                parts.push(`language: ${s.language}  accepted: ${s.accepted}  chars: ${s.charCount}  totalTimeMs: ${s.totalTimeMs}`);
+                parts.push('');
+                parts.push(s.code || '(no code)');
+            });
+            pre.textContent = parts.join('\n');
+            panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        } catch (err) {
+            pre.textContent = 'Error: ' + (err.message || String(err));
+        }
+    };
+
     window._adminViewSessionCode = async function (sessionId) {
         const panel = document.getElementById('admin-session-code-panel');
         const pre = document.getElementById('admin-session-code-pre');
@@ -2656,6 +2698,12 @@
             parts.push('title: ' + d.title);
             parts.push('language: ' + (d.language || ''));
             if (d.owner) parts.push('owner: ' + (d.owner.username || '') + ' <' + (d.owner.email || '') + '>');
+            if (d.collaborators && d.collaborators.length) {
+                parts.push('collaborators:');
+                d.collaborators.forEach((c) => {
+                    parts.push('  - ' + (c.username || '?') + ' <' + (c.email || '') + '>  role=' + (c.role || ''));
+                });
+            }
             if (d.code) parts.push('\n--- legacy code field ---\n' + d.code);
             (d.files || []).forEach((f) => {
                 parts.push('\n--- file: ' + (f.name || '') + ' (' + (f.language || '') + ') ---\n' + (f.content || ''));
