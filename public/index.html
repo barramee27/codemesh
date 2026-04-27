@@ -61,6 +61,67 @@
     </div>
   </div>
 
+  <!-- ═══════════════ CLASH / GRADER (CodinGame-style) ═══════════════ -->
+  <div id="clash-view" class="view clash-view" style="display:none;">
+    <header class="clash-toolbar">
+      <a href="/" class="clash-brand">CodeMesh</a>
+      <span id="clash-toolbar-title" class="clash-toolbar-title">Clash</span>
+      <div class="clash-toolbar-actions">
+        <a href="/clash" class="btn btn-ghost btn-sm" id="clash-hub-link">All clashes</a>
+      </div>
+    </header>
+    <div id="clash-hub-panel" class="clash-panel" style="display:none;">
+      <h2 class="clash-heading">Clash</h2>
+      <p class="clash-muted">AI-generated problems. Modes: reverse (guess from samples), fastest, shortest.</p>
+      <div class="clash-create card-like">
+        <h3>Create (uses Gemini)</h3>
+        <div class="form-row">
+          <label>Mode</label>
+          <select id="clash-create-mode">
+            <option value="reverse">Reverse</option>
+            <option value="fastest">Fastest</option>
+            <option value="shortest">Shortest</option>
+          </select>
+        </div>
+        <div class="form-row">
+          <label>Topic (optional)</label>
+          <input type="text" id="clash-create-topic" placeholder="e.g. strings, math" maxlength="200" />
+        </div>
+        <div class="form-row">
+          <label>Match timer (after host clicks Start)</label>
+          <select id="clash-create-duration">
+            <option value="5">5 minutes</option>
+            <option value="10">10 minutes</option>
+            <option value="15" selected>15 minutes</option>
+            <option value="30">30 minutes</option>
+            <option value="60">60 minutes</option>
+          </select>
+        </div>
+        <button type="button" class="btn btn-primary" id="clash-create-btn">Create clash</button>
+        <p id="clash-create-msg" class="clash-muted"></p>
+      </div>
+      <h3>Open clashes</h3>
+      <ul id="clash-list" class="clash-list"></ul>
+    </div>
+    <div id="clash-room-panel" class="clash-panel" style="display:none;">
+      <div id="clash-room-banner" class="clash-room-banner" style="display:none;"></div>
+      <div id="clash-room-meta" class="clash-room-meta"></div>
+      <div id="clash-room-statement" class="clash-statement"></div>
+      <div id="clash-room-samples" class="clash-samples"></div>
+      <div id="clash-room-public-tests" class="clash-public-tests"></div>
+      <div class="clash-editor-block" id="clash-editor-block">
+        <label>Language</label>
+        <select id="clash-lang-select"></select>
+        <label>Your code</label>
+        <textarea id="clash-code-input" spellcheck="false" rows="16"></textarea>
+        <button type="button" class="btn btn-primary" id="clash-submit-btn">Submit</button>
+      </div>
+      <div id="clash-result" class="clash-result" style="display:none;"></div>
+      <h3>Leaderboard</h3>
+      <div id="clash-leaderboard" class="clash-leaderboard"></div>
+    </div>
+  </div>
+
   <!-- ═══════════════ AUTH VIEW ═══════════════ -->
   <div id="auth-view" class="view" style="display:none;">
     <div class="auth-bg">
@@ -303,6 +364,7 @@
               Join
             </button>
           </div>
+          <a href="/clash" class="btn btn-secondary" id="dashboard-clash-btn">Clash</a>
           <button class="btn btn-primary" id="create-session-btn">
             <svg viewBox="0 0 20 20" fill="currentColor" width="18" height="18">
               <path fill-rule="evenodd"
@@ -675,6 +737,7 @@
       <div class="admin-tabs">
         <button class="admin-tab active" data-admin-tab="users" id="admin-tab-users">👥 Users</button>
         <button class="admin-tab" data-admin-tab="sessions" id="admin-tab-sessions">📄 Sessions</button>
+        <button class="admin-tab" data-admin-tab="clashes" id="admin-tab-clashes">⚔ Clashes</button>
         <button class="admin-tab" data-admin-tab="files" id="admin-tab-files">📁 Files</button>
       </div>
 
@@ -725,6 +788,74 @@
             <tbody id="admin-sessions-tbody">
               <!-- Populated by JS -->
             </tbody>
+          </table>
+        </div>
+        <div id="admin-session-code-panel" class="admin-session-code-panel" style="display:none;">
+          <div class="admin-panel-header">
+            <h4>Session code</h4>
+            <button type="button" class="btn btn-secondary btn-sm" id="admin-session-code-close">Close</button>
+          </div>
+          <pre id="admin-session-code-pre" class="admin-session-code-pre"></pre>
+        </div>
+      </div>
+
+      <!-- Clashes Panel -->
+      <div id="admin-clashes-panel" class="admin-panel" style="display:none;">
+        <div class="admin-panel-header">
+          <h3>Clash grader</h3>
+          <span class="admin-count" id="admin-clash-count">0 clashes</span>
+        </div>
+        <p class="clash-muted" style="margin:0 0 12px;">Batch uses the same pipeline as the hub: <strong>Flash</strong> generates each problem, then <strong>Pro</strong> reviews before save (up to 5 per request; can take several minutes).</p>
+        <div class="admin-batch-clash card-like" style="padding:16px;margin-bottom:20px;border:1px solid var(--vscode-border);border-radius:8px;">
+          <h4 style="margin:0 0 12px;">Batch create</h4>
+          <div class="form-row" style="margin-bottom:8px;">
+            <label>How many</label>
+            <select id="admin-clash-batch-count">
+              <option value="1">1</option>
+              <option value="2">2</option>
+              <option value="3">3</option>
+              <option value="4">4</option>
+              <option value="5">5</option>
+            </select>
+          </div>
+          <div class="form-row" style="margin-bottom:8px;">
+            <label>Mode</label>
+            <select id="admin-clash-batch-mode">
+              <option value="fastest">Fastest</option>
+              <option value="shortest">Shortest</option>
+              <option value="reverse">Reverse</option>
+            </select>
+          </div>
+          <div class="form-row" style="margin-bottom:8px;">
+            <label>Topic (optional)</label>
+            <input type="text" id="admin-clash-batch-topic" maxlength="200" placeholder="strings, graphs, …" style="width:100%;max-width:400px;" />
+          </div>
+          <div class="form-row" style="margin-bottom:8px;">
+            <label>Match timer (minutes)</label>
+            <select id="admin-clash-batch-duration">
+              <option value="5">5</option>
+              <option value="10">10</option>
+              <option value="15" selected>15</option>
+              <option value="30">30</option>
+              <option value="60">60</option>
+            </select>
+          </div>
+          <button type="button" class="btn btn-primary" id="admin-clash-batch-btn">Run batch (Flash + Pro each)</button>
+          <p id="admin-clash-batch-msg" class="clash-muted" style="margin-top:8px;"></p>
+        </div>
+        <div class="admin-table-wrap">
+          <table class="admin-table">
+            <thead>
+              <tr>
+                <th>Slug</th>
+                <th>Title</th>
+                <th>Mode</th>
+                <th>Status</th>
+                <th>Created</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="admin-clashes-tbody"></tbody>
           </table>
         </div>
       </div>

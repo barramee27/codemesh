@@ -2,10 +2,32 @@ const express = require('express');
 const path = require('path');
 const fs = require('fs');
 const multer = require('multer');
+const crypto = require('crypto');
 const User = require('../models/User');
 const Session = require('../models/Session');
+const Clash = require('../models/Clash');
+const ClashSubmission = require('../models/ClashSubmission');
 const authMiddleware = require('../middleware/auth');
 const adminAuth = require('../middleware/adminAuth');
+const { generateClash, verifyClashProblem, flashModelId, proModelId } = require('../utils/geminiClash');
+
+const ROOM_DURATION_PRESETS_MS = {
+    5: 5 * 60 * 1000,
+    10: 10 * 60 * 1000,
+    15: 15 * 60 * 1000,
+    30: 30 * 60 * 1000,
+    60: 60 * 60 * 1000
+};
+
+function makeClashSlug() {
+    return 'c' + crypto.randomBytes(4).toString('hex');
+}
+
+function resolveRoomDurationMs(body) {
+    const m = Number(body.roomDurationMinutes);
+    if (ROOM_DURATION_PRESETS_MS[m]) return ROOM_DURATION_PRESETS_MS[m];
+    return ROOM_DURATION_PRESETS_MS[15];
+}
 
 const router = express.Router();
 
@@ -199,6 +221,143 @@ router.delete('/sessions/:id', async (req, res) => {
     } catch (err) {
         console.error('Admin delete session error:', err);
         res.status(500).json({ error: 'Failed to delete session' });
+    }
+});
+
+// GET /api/admin/sessions/:sessionId/detail — full session payload (files/code) for inspection
+router.get('/sessions/:sessionId/detail', async (req, res) => {
+    try {
+        const session = await Session.findOne({ sessionId: req.params.sessionId })
+            .populate('owner', 'username email')
+            .lean();
+        if (!session) return res.status(404).json({ error: 'Session not found' });
+        const maxFileChars = 400000;
+        const files = (session.files || []).map((f) => ({
+            id: f.id,
+            name: f.name,
+            language: f.language,
+            content: f.content && f.content.length > maxFileChars
+                ? f.content.slice(0, maxFileChars) + '\n… [truncated]'
+                : f.content
+        }));
+        res.json({
+            sessionId: session.sessionId,
+            title: session.title,
+            language: session.language,
+            code: session.code,
+            files,
+            comments: session.comments,
+            owner: session.owner,
+            isPublic: session.isPublic,
+            createdAt: session.createdAt,
+            updatedAt: session.updatedAt
+        });
+    } catch (err) {
+        console.error('Admin session detail error:', err);
+        res.status(500).json({ error: 'Failed to load session' });
+    }
+});
+
+// GET /api/admin/clashes — all clashes including verifying / rejected
+router.get('/clashes', async (req, res) => {
+    try {
+        const rows = await Clash.find({})
+            .sort({ createdAt: -1 })
+            .limit(100)
+            .populate('createdBy', 'username')
+            .select('slug mode title status createdAt roomDurationMs verificationReason')
+            .lean();
+        res.json(rows);
+    } catch (err) {
+        console.error('Admin list clashes error:', err);
+        res.status(500).json({ error: 'Failed to list clashes' });
+    }
+});
+
+// POST /api/admin/clashes/batch — Flash + Pro per item (sequential; max 5 per request)
+router.post('/clashes/batch', async (req, res) => {
+    try {
+        const count = Math.min(5, Math.max(1, parseInt(req.body.count, 10) || 1));
+        const mode = req.body.mode;
+        if (!['reverse', 'fastest', 'shortest'].includes(mode)) {
+            return res.status(400).json({ error: 'mode must be reverse, fastest, or shortest' });
+        }
+        const topic = req.body.topic && String(req.body.topic).slice(0, 200);
+        const difficulty = req.body.difficulty && String(req.body.difficulty).slice(0, 50);
+        const roomDurationMs = resolveRoomDurationMs(req.body);
+        const timeLimitMs = Math.min(Number(req.body.timeLimitMs) || 8000, 15000);
+        const flashModel = flashModelId();
+        const proModel = proModelId();
+
+        const created = [];
+        const failed = [];
+
+        for (let i = 0; i < count; i++) {
+            try {
+                const payload = await generateClash({
+                    mode,
+                    topic,
+                    difficulty,
+                    languages: req.body.languages,
+                    modelId: flashModel
+                });
+                const verdict = await verifyClashProblem({
+                    mode,
+                    title: payload.title,
+                    statement: payload.statement,
+                    samples: payload.samples,
+                    tests: payload.tests,
+                    modelId: proModel
+                });
+                if (!verdict.approved) {
+                    failed.push({ index: i, error: verdict.reason || 'Pro rejected' });
+                    continue;
+                }
+                let slug = makeClashSlug();
+                for (let j = 0; j < 5; j++) {
+                    const exists = await Clash.findOne({ slug });
+                    if (!exists) break;
+                    slug = makeClashSlug();
+                }
+                const doc = await Clash.create({
+                    slug,
+                    mode,
+                    status: 'ready',
+                    title: payload.title,
+                    statement: payload.statement,
+                    samples: payload.samples,
+                    tests: payload.tests,
+                    allowedLanguages: payload.allowedLanguages,
+                    timeLimitMs,
+                    roomDurationMs,
+                    createdBy: req.user.id,
+                    aiModel: flashModel,
+                    aiReviewerModel: proModel
+                });
+                created.push({ slug: doc.slug, title: doc.title });
+            } catch (e) {
+                failed.push({ index: i, error: e.message || String(e) });
+            }
+        }
+
+        res.json({ created, failed, flashModel, proModel });
+    } catch (err) {
+        console.error('Admin batch clashes error:', err);
+        res.status(500).json({ error: err.message || 'Batch failed' });
+    }
+});
+
+// DELETE /api/admin/clashes/:slug
+router.delete('/clashes/:slug', async (req, res) => {
+    try {
+        const clash = await Clash.findOne({ slug: req.params.slug });
+        if (!clash) return res.status(404).json({ error: 'Clash not found' });
+        await ClashSubmission.deleteMany({ clashId: clash._id });
+        await Clash.deleteOne({ _id: clash._id });
+        res.json({ message: `Clash ${req.params.slug} deleted` });
+    } catch (err) {
+        console.error('Admin delete clash error:', err);
+        res.status(500).json({ error: 'Failed to delete clash' });
     }
 });
 

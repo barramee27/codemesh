@@ -16,6 +16,7 @@ const sessionRoutes = require('./routes/sessions');
 const runRoutes = require('./routes/run');
 const terminalRoutes = require('./routes/terminal');
 const adminRoutes = require('./routes/admin');
+const graderRoutes = require('./routes/grader');
 const setupCollaboration = require('./sockets/collaboration');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'fallback_secret';
@@ -79,6 +80,7 @@ app.use('/api/sessions', sessionRoutes);
 app.use('/api/run', runRoutes);
 app.use('/api/terminal', terminalRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/grader', graderRoutes);
 
 // SPA fallback (no-cache so deploys are visible immediately)
 app.get('*', (req, res) => {

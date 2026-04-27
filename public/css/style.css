@@ -2146,3 +2146,246 @@ select.input-full {
 .publish-empty .btn {
   margin-top: 16px;
 }
+
+/* ═══ Clash / grader view ═══ */
+.clash-view {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  background: var(--vscode-bg, #1e1e1e);
+  color: var(--vscode-fg, #ccc);
+}
+
+.clash-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 10px 16px;
+  background: var(--vscode-titlebar-bg, #3c3c3c);
+  border-bottom: 1px solid var(--vscode-border, #333);
+}
+
+.clash-brand {
+  font-weight: 600;
+  color: #a78bfa;
+  text-decoration: none;
+}
+
+.clash-brand:hover {
+  text-decoration: underline;
+}
+
+.clash-toolbar-title {
+  flex: 1;
+  font-family: var(--font-mono, monospace);
+  font-size: 14px;
+  opacity: 0.95;
+}
+
+.clash-toolbar-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.clash-panel {
+  flex: 1;
+  padding: 20px 24px 48px;
+  max-width: 920px;
+  margin: 0 auto;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.clash-heading {
+  margin: 0 0 8px;
+  font-size: 1.5rem;
+}
+
+.clash-muted {
+  color: var(--text-muted, #888);
+  font-size: 14px;
+}
+
+.clash-create.card-like {
+  margin: 20px 0;
+  padding: 16px;
+  border: 1px solid var(--vscode-border, #3c3c3c);
+  border-radius: 8px;
+  background: var(--vscode-sidebar-bg, #252526);
+}
+
+.clash-create .form-row {
+  margin-bottom: 12px;
+}
+
+.clash-create label {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 13px;
+}
+
+.clash-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.clash-li {
+  padding: 8px 0;
+  border-bottom: 1px solid var(--vscode-border, #333);
+}
+
+.clash-li a {
+  color: #7dd3fc;
+  text-decoration: none;
+}
+
+.clash-li a:hover {
+  text-decoration: underline;
+}
+
+.clash-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: #37373d;
+  font-size: 12px;
+  text-transform: uppercase;
+  margin-right: 8px;
+}
+
+.clash-badge-sm {
+  font-size: 10px;
+  padding: 1px 6px;
+  text-transform: none;
+}
+
+.clash-room-banner {
+  margin-bottom: 16px;
+  padding: 12px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--vscode-border, #444);
+  background: var(--vscode-sidebar-bg, #252526);
+}
+
+.admin-session-code-panel {
+  margin-top: 16px;
+  padding: 12px;
+  border: 1px solid var(--vscode-border, #444);
+  border-radius: 8px;
+  background: var(--vscode-sidebar-bg, #252526);
+}
+
+.admin-session-code-pre {
+  margin: 8px 0 0;
+  max-height: 50vh;
+  overflow: auto;
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: var(--font-mono, monospace);
+}
+
+.clash-io-pair {
+  margin: 12px 0;
+  padding: 12px;
+  border-radius: 6px;
+  background: var(--vscode-input-bg, #3c3c3c);
+  border: 1px solid var(--vscode-border, #444);
+}
+
+.clash-io-pair pre {
+  margin: 6px 0 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 13px;
+  font-family: var(--font-mono, monospace);
+}
+
+.clash-editor-block {
+  margin-top: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.clash-editor-block select,
+.clash-editor-block textarea {
+  font-family: var(--font-mono, monospace);
+  font-size: 13px;
+  padding: 10px;
+  border-radius: 6px;
+  border: 1px solid var(--vscode-border, #444);
+  background: var(--vscode-input-bg, #3c3c3c);
+  color: var(--vscode-input-fg, #ccc);
+}
+
+.clash-editor-block textarea {
+  min-height: 200px;
+  resize: vertical;
+}
+
+.clash-result {
+  margin-top: 16px;
+  padding: 12px;
+  border-radius: 6px;
+  border: 1px solid var(--vscode-border, #444);
+}
+
+.clash-ok {
+  color: #4ade80;
+  margin: 0 0 8px;
+}
+
+.clash-bad {
+  color: #f87171;
+  margin: 0 0 8px;
+}
+
+.clash-fail {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--vscode-border, #444);
+}
+
+.clash-fail h4 {
+  margin: 0 0 8px;
+  font-size: 14px;
+}
+
+.clash-io {
+  margin: 0 0 12px;
+  padding: 10px;
+  border-radius: 4px;
+  background: #1e1e1e;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 13px;
+  font-family: var(--font-mono, monospace);
+  max-height: 240px;
+  overflow: auto;
+}
+
+.clash-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+  margin-top: 8px;
+}
+
+.clash-table th,
+.clash-table td {
+  border: 1px solid var(--vscode-border, #444);
+  padding: 8px 10px;
+  text-align: left;
+}
+
+.clash-table thead {
+  background: var(--vscode-sidebar-bg, #252526);
+}
+
+.clash-leaderboard {
+  margin-top: 12px;
+}
