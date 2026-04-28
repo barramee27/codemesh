@@ -2677,6 +2677,38 @@ select.input-full {
   letter-spacing: 0.08em;
 }
 
+.coc-lobby-lang-wrap {
+  margin-top: 14px;
+  text-align: left;
+}
+
+.coc-lobby-lang-label {
+  display: block;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--coc-muted);
+  margin-bottom: 6px;
+}
+
+.coc-lobby-lang-select {
+  width: 100%;
+}
+
+.coc-lobby-lang-hint {
+  margin-top: 8px;
+  margin-bottom: 0;
+}
+
+.coc-lobby-cta-msg {
+  margin: 0;
+  text-align: center;
+  max-width: 28rem;
+  margin-left: auto;
+  margin-right: auto;
+  line-height: 1.5;
+}
+
 .coc-player-grid {
   display: grid;
   grid-template-columns: repeat(5, 1fr);

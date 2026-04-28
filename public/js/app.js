@@ -2860,6 +2860,7 @@
         const modeLabel = c.mode || c.resolvedMode || '';
 
         const showLobby = ['preparing', 'lobby', 'countdown'].includes(phase);
+        const langs = (c.allowedLanguages && c.allowedLanguages.length) ? c.allowedLanguages : ['python'];
         const inviteUrl = window.location.origin + clashRoomUrlPath(slug);
         if (shareInput) shareInput.value = inviteUrl;
 
@@ -2884,45 +2885,73 @@
                         : '—';
                 }
                 const langsEl = document.getElementById('clash-lobby-langs');
+                const langCount = langs.length;
                 if (langsEl) {
-                    langsEl.textContent = c.languagesAll
-                        ? 'All sandbox languages'
-                        : `${(c.allowedLanguages || []).slice(0, 6).join(', ')}${(c.allowedLanguages || []).length > 6 ? '…' : ''}`;
+                    if (c.languagesAll) {
+                        langsEl.textContent = `All sandbox (${langCount})`;
+                    } else {
+                        const preview = langs.slice(0, 5).join(', ');
+                        langsEl.textContent = langCount <= 5
+                            ? preview
+                            : `${preview}… (${langCount} total)`;
+                    }
                 }
                 const slots = document.getElementById('clash-lobby-slots');
                 if (slots) slots.innerHTML = buildClashLobbySlotHtml(c.participants, c.maxPlayers);
                 const asideNote = document.getElementById('clash-lobby-aside-note');
                 if (asideNote) {
-                    asideNote.textContent = c.isOwner
-                        ? 'You are the host — start the countdown when players are ready.'
-                        : 'Wait for the host to start the countdown.';
+                    if (c.isOwner) {
+                        if (phase === 'preparing' && status === 'verifying') {
+                            asideNote.textContent = 'You are the host — the puzzle is being verified. Start countdown will appear in the lobby when the room is ready.';
+                        } else {
+                            asideNote.textContent = 'You are the host — start the countdown when players are ready.';
+                        }
+                    } else {
+                        asideNote.textContent = phase === 'preparing' && status === 'verifying'
+                            ? 'The puzzle is still being prepared — wait for the host to start the countdown.'
+                            : 'Wait for the host to start the countdown.';
+                    }
                 }
                 const cdLabel = document.getElementById('clash-lobby-cd-label');
                 const cdDigits = document.getElementById('clash-lobby-cd');
+                const preCdSec = Math.max(1, Math.floor((c.countdownDurationMs || 300000) / 1000));
                 if (phase === 'countdown' && c.countdownEndsAt) {
-                    if (cdLabel) cdLabel.textContent = 'Clash starts in';
-                    const startSec = c.countdownSecondsRemaining != null ? c.countdownSecondsRemaining : 0;
-                    if (cdDigits) cdDigits.textContent = formatClashCountdown(startSec);
                     const endMs = new Date(c.countdownEndsAt).getTime();
-                    clashLobbyTickInterval = setInterval(() => {
-                        if (currentClashSlug !== slug) return;
-                        const left = Math.max(0, Math.floor((endMs - Date.now()) / 1000));
-                        if (cdDigits) cdDigits.textContent = formatClashCountdown(left);
-                        if (left <= 0) {
-                            clearInterval(clashLobbyTickInterval);
-                            clashLobbyTickInterval = null;
-                            openClashRoom(slug);
-                        }
-                    }, 1000);
-                } else {
                     if (cdLabel) cdLabel.textContent = 'Clash starts in';
-                    if (cdDigits) cdDigits.textContent = '—:—';
+                    if (!Number.isFinite(endMs)) {
+                        if (cdDigits) cdDigits.textContent = '—:—';
+                    } else {
+                        const startSec = c.countdownSecondsRemaining != null ? c.countdownSecondsRemaining
+                            : Math.max(0, Math.floor((endMs - Date.now()) / 1000));
+                        if (cdDigits) cdDigits.textContent = formatClashCountdown(startSec);
+                        clashLobbyTickInterval = setInterval(() => {
+                            if (currentClashSlug !== slug) return;
+                            const left = Math.max(0, Math.floor((endMs - Date.now()) / 1000));
+                            if (cdDigits) cdDigits.textContent = formatClashCountdown(left);
+                            if (left <= 0) {
+                                clearInterval(clashLobbyTickInterval);
+                                clashLobbyTickInterval = null;
+                                openClashRoom(slug);
+                            }
+                        }, 1000);
+                    }
+                } else {
+                    if (cdLabel) {
+                        cdLabel.textContent = phase === 'preparing' && status === 'verifying'
+                            ? 'Countdown length (after host starts)'
+                            : 'Pre-start countdown (when host starts)';
+                    }
+                    if (cdDigits) cdDigits.textContent = formatClashCountdown(preCdSec);
                 }
                 const cta = document.getElementById('clash-lobby-cta-row');
                 if (cta) {
-                    cta.innerHTML = c.canStart
-                        ? '<button type="button" class="coc-btn-start-countdown" id="clash-start-btn">Start countdown</button>'
-                        : '';
+                    if (c.canStart) {
+                        cta.innerHTML = '<button type="button" class="coc-btn-start-countdown" id="clash-start-btn">Start countdown</button>';
+                    } else if (c.isOwner && phase === 'preparing' && status === 'verifying') {
+                        cta.innerHTML = '<p class="coc-aside-muted coc-lobby-cta-msg">Verifying puzzle… <strong>Start countdown</strong> will appear here when the room is ready (usually a few seconds).</p>';
+                    } else {
+                        cta.innerHTML = '';
+                    }
                 }
             } else {
                 lobbyLayout.style.display = 'none';
@@ -3004,8 +3033,8 @@
             }
         }
         if (langSel) {
-            const langs = c.allowedLanguages || ['python'];
-            const prevLang = langSel.value;
+            const prevLobby = document.getElementById('clash-lobby-lang-select')?.value;
+            const prevLang = langSel.value || prevLobby || '';
             langSel.innerHTML = langs.map((l) => `<option value="${escapeHtml(l)}">${escapeHtml(l)}</option>`).join('');
             const pick = langs.includes(prevLang) ? prevLang : langs[0];
             if (pick) langSel.value = pick;
@@ -3016,6 +3045,19 @@
                         mapLanguageToMonaco(langSel.value)
                     );
                 } catch (_) { /* ignore */ }
+            }
+        }
+        const lobbyLangEl = document.getElementById('clash-lobby-lang-select');
+        const lobbyLangHint = document.getElementById('clash-lobby-lang-hint');
+        if (showLobby && lobbyLangEl) {
+            lobbyLangEl.innerHTML = langs.map((l) => `<option value="${escapeHtml(l)}">${escapeHtml(l)}</option>`).join('');
+            const preferred = (langSel && langs.includes(langSel.value)) ? langSel.value : langs[0];
+            lobbyLangEl.value = preferred;
+            if (langSel && preferred) langSel.value = preferred;
+            if (lobbyLangHint) {
+                lobbyLangHint.textContent = c.languagesAll
+                    ? `All ${langs.length} sandbox languages are allowed.`
+                    : `${langs.length} language(s) allowed for this room — pick one for your solution.`;
             }
         }
 
@@ -3278,14 +3320,28 @@
             openClashHub();
         });
         document.getElementById('clash-view')?.addEventListener('click', (e) => {
-            if (e.target && e.target.id === 'clash-join-btn') {
+            if (e.target.closest('#clash-join-btn')) {
                 e.preventDefault();
                 joinClashRoom();
                 return;
             }
-            if (e.target && e.target.id === 'clash-start-btn') {
+            if (e.target.closest('#clash-start-btn')) {
                 e.preventDefault();
                 startClash();
+            }
+        });
+        document.getElementById('clash-lobby-lang-select')?.addEventListener('change', () => {
+            const lobby = document.getElementById('clash-lobby-lang-select');
+            const main = document.getElementById('clash-lang-select');
+            if (!lobby || !main || !lobby.value) return;
+            main.value = lobby.value;
+            if (clashMonacoEditor && window.monaco) {
+                try {
+                    window.monaco.editor.setModelLanguage(
+                        clashMonacoEditor.getModel(),
+                        mapLanguageToMonaco(main.value)
+                    );
+                } catch (_) { /* ignore */ }
             }
         });
         document.addEventListener('keydown', (e) => {

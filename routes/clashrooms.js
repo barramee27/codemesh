@@ -358,6 +358,7 @@ function buildRoomDetailPayload(room, reqUserId) {
         mode: hidden ? null : room.resolvedMode,
         serverTime: new Date().toISOString(),
         roomDurationMs: room.roomDurationMs || ROOM_DURATION_PRESETS_MS[15],
+        countdownDurationMs: room.countdownDurationMs || 300000,
         timeLimitMs: room.timeLimitMs,
         allowedLanguages: room.languagesAll ? ALL_RUNNER_LANGS : room.allowedLanguages,
         languagesAll: !!room.languagesAll,
