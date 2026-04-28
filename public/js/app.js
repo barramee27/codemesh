@@ -2988,6 +2988,8 @@
                 }
                 const slots = document.getElementById('clash-lobby-slots');
                 if (slots) slots.innerHTML = buildClashLobbySlotHtml(c.participants, c.maxPlayers);
+                const joinBtn = document.getElementById('clash-join-btn');
+                if (joinBtn) joinBtn.style.display = c.isOwner ? 'none' : '';
                 const asideNote = document.getElementById('clash-lobby-aside-note');
                 if (asideNote) {
                     if (c.isOwner) {
@@ -3034,14 +3036,19 @@
                     if (cdDigits) cdDigits.textContent = formatClashCountdown(preCdSec);
                 }
                 const cta = document.getElementById('clash-lobby-cta-row');
+                const asideCta = document.getElementById('clash-lobby-aside-cta');
+                const ctaHtml = c.canStart
+                    ? '<button type="button" class="coc-btn-start-countdown" id="clash-start-btn">Start countdown</button>'
+                    : (c.isOwner && phase === 'preparing' && status === 'verifying'
+                        ? '<p class="coc-aside-muted coc-lobby-cta-msg">Verifying puzzle… <strong>Start countdown</strong> will appear here when the room is ready (usually a few seconds).</p>'
+                        : '');
                 if (cta) {
-                    if (c.canStart) {
-                        cta.innerHTML = '<button type="button" class="coc-btn-start-countdown" id="clash-start-btn">Start countdown</button>';
-                    } else if (c.isOwner && phase === 'preparing' && status === 'verifying') {
-                        cta.innerHTML = '<p class="coc-aside-muted coc-lobby-cta-msg">Verifying puzzle… <strong>Start countdown</strong> will appear here when the room is ready (usually a few seconds).</p>';
-                    } else {
-                        cta.innerHTML = '';
-                    }
+                    cta.innerHTML = ctaHtml;
+                }
+                if (asideCta) {
+                    asideCta.innerHTML = c.canStart
+                        ? '<button type="button" class="coc-btn-start-countdown" id="clash-start-sidebar-btn">Start countdown</button>'
+                        : ctaHtml;
                 }
             } else {
                 lobbyLayout.style.display = 'none';
@@ -3483,7 +3490,7 @@
                 joinClashRoom();
                 return;
             }
-            if (e.target.closest('#clash-start-btn')) {
+            if (e.target.closest('#clash-start-btn, #clash-start-sidebar-btn')) {
                 e.preventDefault();
                 startClash();
             }
