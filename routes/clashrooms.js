@@ -93,6 +93,12 @@ async function pulseRoomBySlug(slug) {
     if (!room) return null;
     const now = Date.now();
 
+    if (room.phase === 'lobby' && room.status === 'ready') {
+        room.phase = 'countdown';
+        room.countdownEndsAt = new Date(now + (room.countdownDurationMs || 300000));
+        await room.save();
+    }
+
     if (room.phase === 'countdown' && room.status === 'ready' && room.countdownEndsAt
         && new Date(room.countdownEndsAt).getTime() <= now) {
         room.phase = 'live';
@@ -139,12 +145,14 @@ async function runProVerification(roomId) {
         });
 
         if (verdict.approved) {
+            const countdownDurationMs = room.countdownDurationMs || 300000;
             await ClashRoom.findOneAndUpdate(
                 { _id: roomId, status: 'verifying', phase: 'preparing' },
                 {
                     $set: {
                         status: 'ready',
-                        phase: 'lobby',
+                        phase: 'countdown',
+                        countdownEndsAt: new Date(Date.now() + countdownDurationMs),
                         aiReviewerModel: proModel,
                         updatedAt: new Date()
                     }
@@ -618,6 +626,36 @@ router.post('/:slug/start', authMiddleware, async (req, res) => {
     } catch (err) {
         console.error('clashrooms start:', err);
         res.status(500).json({ error: err.message || 'Start failed' });
+    }
+});
+
+/** POST /api/clashrooms/:slug/start-now — host skips countdown and unlocks the puzzle immediately. */
+router.post('/:slug/start-now', authMiddleware, async (req, res) => {
+    try {
+        const room = await ClashRoom.findOne({ slug: req.params.slug });
+        if (!room) return res.status(404).json({ error: 'Room not found' });
+        if (String(room.createdBy) !== req.user.id) {
+            return res.status(403).json({ error: 'Only the host can start now' });
+        }
+        if (!['lobby', 'countdown'].includes(room.phase) || room.status !== 'ready') {
+            return res.status(400).json({ error: 'Cannot start now from this state' });
+        }
+
+        const now = Date.now();
+        room.phase = 'live';
+        room.startedAt = new Date(now);
+        room.endsAt = new Date(now + (room.roomDurationMs || ROOM_DURATION_PRESETS_MS[15]));
+        room.countdownEndsAt = undefined;
+        await room.save();
+        return res.json({
+            phase: room.phase,
+            startedAt: room.startedAt,
+            endsAt: room.endsAt,
+            message: 'Clash started now. Puzzle unlocked.'
+        });
+    } catch (err) {
+        console.error('clashrooms start-now:', err);
+        res.status(500).json({ error: err.message || 'Start now failed' });
     }
 });
 

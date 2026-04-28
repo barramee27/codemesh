@@ -2994,14 +2994,16 @@
                 if (asideNote) {
                     if (c.isOwner) {
                         if (phase === 'preparing' && status === 'verifying') {
-                            asideNote.textContent = 'You are the host — the puzzle is being verified. Start countdown will appear in the lobby when the room is ready.';
+                            asideNote.textContent = 'You are the host — countdown starts automatically as soon as verification finishes.';
                         } else {
-                            asideNote.textContent = 'You are the host — start the countdown when players are ready.';
+                            asideNote.textContent = phase === 'countdown'
+                                ? 'Countdown is running automatically — use Start now to skip the wait.'
+                                : 'Countdown starts automatically when the room is ready.';
                         }
                     } else {
                         asideNote.textContent = phase === 'preparing' && status === 'verifying'
-                            ? 'The puzzle is still being prepared — wait for the host to start the countdown.'
-                            : 'Wait for the host to start the countdown.';
+                            ? 'The puzzle is still being prepared — countdown starts automatically when it is ready.'
+                            : 'Countdown starts automatically; wait for the puzzle to unlock.';
                     }
                 }
                 const cdLabel = document.getElementById('clash-lobby-cd-label');
@@ -3030,24 +3032,25 @@
                 } else {
                     if (cdLabel) {
                         cdLabel.textContent = phase === 'preparing' && status === 'verifying'
-                            ? 'Countdown length (after host starts)'
-                            : 'Pre-start countdown (when host starts)';
+                            ? 'Countdown length (after verification)'
+                            : 'Countdown starts automatically';
                     }
                     if (cdDigits) cdDigits.textContent = formatClashCountdown(preCdSec);
                 }
                 const cta = document.getElementById('clash-lobby-cta-row');
                 const asideCta = document.getElementById('clash-lobby-aside-cta');
-                const ctaHtml = c.canStart
-                    ? '<button type="button" class="coc-btn-start-countdown" id="clash-start-btn">Start countdown</button>'
+                const canStartNow = c.isOwner && status === 'ready' && ['lobby', 'countdown'].includes(phase);
+                const ctaHtml = canStartNow
+                    ? '<button type="button" class="coc-btn-start-countdown" id="clash-start-btn">Start now</button>'
                     : (c.isOwner && phase === 'preparing' && status === 'verifying'
-                        ? '<p class="coc-aside-muted coc-lobby-cta-msg">Verifying puzzle… <strong>Start countdown</strong> will appear here when the room is ready (usually a few seconds).</p>'
+                        ? '<p class="coc-aside-muted coc-lobby-cta-msg">Verifying puzzle… countdown will start automatically when ready.</p>'
                         : '');
                 if (cta) {
                     cta.innerHTML = ctaHtml;
                 }
                 if (asideCta) {
-                    asideCta.innerHTML = c.canStart
-                        ? '<button type="button" class="coc-btn-start-countdown" id="clash-start-sidebar-btn">Start countdown</button>'
+                    asideCta.innerHTML = canStartNow
+                        ? '<button type="button" class="coc-btn-start-countdown" id="clash-start-sidebar-btn">Start now</button>'
                         : ctaHtml;
                 }
             } else {
@@ -3238,8 +3241,8 @@
                             clashPollInterval = null;
                             if (c2.status === 'rejected') {
                                 showToast('Room did not pass review', 'error');
-                            } else if (prevSnap.status === 'verifying' && c2.status === 'ready' && c2.isOwner && c2.phase === 'lobby') {
-                                showToast('Puzzle validated — invite players, then start the countdown.', 'success');
+                            } else if (prevSnap.status === 'verifying' && c2.status === 'ready' && c2.isOwner && c2.phase === 'countdown') {
+                                showToast('Puzzle validated — countdown started automatically.', 'success');
                             } else if (prevSnap.problemHidden && !c2.problemHidden && c2.phase === 'live') {
                                 showToast('Match is live — puzzle unlocked.', 'success');
                             }
@@ -3261,14 +3264,14 @@
         const slug = currentClashSlug;
         if (!slug) return;
         try {
-            const body = await api('/clashrooms/' + encodeURIComponent(slug) + '/start', { method: 'POST' });
+            const body = await api('/clashrooms/' + encodeURIComponent(slug) + '/start-now', { method: 'POST' });
             const msg = body && body.message
                 ? body.message
-                : (body && body.phase === 'countdown' ? 'Countdown started.' : 'Match started.');
+                : 'Match started.';
             showToast(msg, 'success');
             await openClashRoom(slug);
         } catch (err) {
-            showToast(err.message || 'Could not start', 'error');
+            showToast(err.message || 'Could not start now', 'error');
         }
     }
 
