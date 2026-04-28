@@ -111,18 +111,18 @@
           </label>
         </div>
         <label class="coc-field-label">Programming languages allowed</label>
-        <p class="coc-modal-sub coc-lang-section-sub">Like CodinGame: allow the full sandbox list, or restrict to specific languages.</p>
-        <label class="coc-field-label coc-check-all-lang">
-          <input type="checkbox" id="clash-lang-all" checked />
-          <span>All languages supported by the sandbox</span>
-        </label>
-        <div id="clash-lang-subset-wrap" class="coc-lang-subset-wrap" style="display:none;">
-          <p class="coc-modal-sub coc-lang-pick-hint">Pick one or more — players choose one of these when coding.</p>
-          <div id="clash-lang-checkboxes" class="coc-lang-checkbox-grid" role="group" aria-label="Allowed languages"></div>
+        <p class="coc-modal-sub coc-lang-section-sub">All languages, or choose several with Ctrl/Cmd + click in the list.</p>
+        <select id="clash-lang-scope" class="coc-select-wide" aria-label="Language scope">
+          <option value="all" selected>All languages supported by the sandbox</option>
+          <option value="subset">Only selected languages…</option>
+        </select>
+        <div id="clash-lang-multiselect-wrap" class="coc-lang-multiselect-wrap" style="display:none;">
+          <label class="coc-field-label" for="clash-lang-multiselect">Languages (multi-select)</label>
+          <select id="clash-lang-multiselect" class="coc-lang-multiselect" multiple size="10" aria-label="Allowed languages"></select>
         </div>
         <label class="coc-field-label">Puzzle source</label>
         <select id="clash-source" class="coc-select-wide">
-          <option value="auto">Random: bank or new AI</option>
+          <option value="auto">Auto — admin premade first, then bank or AI</option>
           <option value="bank">Bank only (instant)</option>
           <option value="ai">New AI only</option>
         </select>
@@ -913,7 +913,7 @@
           <h3>Clash of Code rooms</h3>
           <span class="admin-count" id="admin-clashroom-count">0 rooms</span>
         </div>
-        <p class="clash-muted" style="margin:0 0 12px;">List active and recent private rooms. Open <strong>All code</strong> to inspect submissions.</p>
+        <p class="clash-muted" style="margin:0 0 12px;">List active and recent private rooms. Open <strong>All code</strong> to inspect submissions. <strong>Leave clash</strong> in the lobby removes you from the player list so counts stay accurate.</p>
         <div class="admin-table-wrap">
           <table class="admin-table">
             <thead>
@@ -930,6 +930,30 @@
             </thead>
             <tbody id="admin-clashrooms-tbody"></tbody>
           </table>
+        </div>
+        <div class="admin-panel-header" style="margin-top:28px;">
+          <h3>Premade puzzle queue</h3>
+          <span class="admin-count" id="admin-premade-count">0</span>
+        </div>
+        <p class="clash-muted" style="margin:0 0 12px;">FIFO per mode: when a player creates a clash, one available premade for the rolled mode is used before bank/AI. Add JSON below (same shape as internal bank templates).</p>
+        <div class="admin-table-wrap">
+          <table class="admin-table">
+            <thead>
+              <tr>
+                <th>Mode</th>
+                <th>Title</th>
+                <th>Status</th>
+                <th>Created</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="admin-premade-tbody"></tbody>
+          </table>
+        </div>
+        <div style="margin-top:14px;">
+          <label class="coc-field-label" for="admin-premade-json">Add premade (JSON)</label>
+          <textarea id="admin-premade-json" class="coc-input-wide" style="min-height:140px;font-family:ui-monospace,monospace;font-size:12px;" spellcheck="false" placeholder='{"resolvedMode":"fastest","title":"Sum two numbers","statement":"Read two integers, print their sum.","samples":[{"input":"1 2","output":"3"}],"tests":[{"input":"0 0","output":"0","hidden":false}]}'></textarea>
+          <button type="button" class="btn btn-primary btn-sm" id="admin-premade-add-btn" style="margin-top:10px;">Add to queue</button>
         </div>
         <div id="admin-clashroom-submissions-panel" class="admin-session-code-panel" style="display:none;">
           <div class="admin-panel-header" style="margin:0;">

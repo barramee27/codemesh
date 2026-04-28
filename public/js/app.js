@@ -2429,7 +2429,10 @@
                 if (sessionsPanel) sessionsPanel.style.display = target === 'sessions' ? '' : 'none';
                 if (clashroomsPanel) {
                     clashroomsPanel.style.display = target === 'clashrooms' ? '' : 'none';
-                    if (target === 'clashrooms') loadAdminClashrooms();
+                    if (target === 'clashrooms') {
+                        loadAdminClashrooms();
+                        loadAdminClashPremades();
+                    }
                 }
                 if (filesPanel) {
                     filesPanel.style.display = target === 'files' ? '' : 'none';
@@ -2472,6 +2475,36 @@
                 } catch (err) {
                     showToast(err.message, 'error');
                 }
+                return;
+            }
+            const premDel = e.target.closest('.admin-delete-premade');
+            if (premDel && premDel.dataset.id) {
+                if (!confirm('Remove this premade from the queue?')) return;
+                try {
+                    await api('/admin/clash-premades/' + encodeURIComponent(premDel.dataset.id), { method: 'DELETE' });
+                    showToast('Premade deleted', 'success');
+                    loadAdminClashPremades();
+                } catch (err) {
+                    showToast(err.message, 'error');
+                }
+            }
+        });
+
+        document.getElementById('admin-premade-add-btn')?.addEventListener('click', async () => {
+            const ta = document.getElementById('admin-premade-json');
+            const raw = (ta && ta.value || '').trim();
+            if (!raw) {
+                showToast('Paste JSON for the premade puzzle', 'error');
+                return;
+            }
+            try {
+                const obj = JSON.parse(raw);
+                await api('/admin/clash-premades', { method: 'POST', body: JSON.stringify(obj) });
+                showToast('Premade added to queue', 'success');
+                if (ta) ta.value = '';
+                loadAdminClashPremades();
+            } catch (err) {
+                showToast(err.message || 'Invalid JSON or request failed', 'error');
             }
         });
 
@@ -2486,7 +2519,7 @@
 
     async function loadAdminPanel() {
         showView('admin');
-        await Promise.all([loadAdminUsers(), loadAdminSessions(), loadAdminClashrooms(), loadAdminFiles()]);
+        await Promise.all([loadAdminUsers(), loadAdminSessions(), loadAdminClashrooms(), loadAdminClashPremades(), loadAdminFiles()]);
     }
 
     async function loadAdminClashrooms() {
@@ -2515,6 +2548,29 @@
         } catch (err) {
             if (countEl) countEl.textContent = '—';
             tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--text-muted);padding:24px;">Failed to load</td></tr>';
+        }
+    }
+
+    async function loadAdminClashPremades() {
+        const tbody = document.getElementById('admin-premade-tbody');
+        const countEl = document.getElementById('admin-premade-count');
+        if (!tbody) return;
+        try {
+            const rows = await api('/admin/clash-premades');
+            if (countEl) countEl.textContent = `${rows.length} items`;
+            tbody.innerHTML = rows.length === 0
+                ? '<tr><td colspan="5" style="text-align:center;color:var(--text-muted);padding:16px;">No premades — new clashes use bank/AI only until you add some.</td></tr>'
+                : rows.map((r) => `
+                    <tr>
+                        <td>${escapeHtml(r.resolvedMode || '—')}</td>
+                        <td>${escapeHtml(r.title || '—')}</td>
+                        <td>${escapeHtml(r.status || '—')}</td>
+                        <td>${timeAgo(r.createdAt)}</td>
+                        <td><button type="button" class="btn-delete admin-delete-premade" data-id="${escapeHtml(String(r._id))}">Delete</button></td>
+                    </tr>`).join('');
+        } catch (err) {
+            if (countEl) countEl.textContent = '—';
+            tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--text-muted);padding:16px;">Failed to load premades</td></tr>';
         }
     }
 
@@ -3226,31 +3282,43 @@
     }
 
     function syncClashLangSubsetVisibility() {
-        const all = !!document.getElementById('clash-lang-all')?.checked;
-        const wrap = document.getElementById('clash-lang-subset-wrap');
-        if (wrap) wrap.style.display = all ? 'none' : '';
+        const scope = document.getElementById('clash-lang-scope')?.value || 'all';
+        const wrap = document.getElementById('clash-lang-multiselect-wrap');
+        if (wrap) wrap.style.display = scope === 'all' ? 'none' : '';
     }
 
     async function refreshClashCreateLangUi() {
-        const grid = document.getElementById('clash-lang-checkboxes');
-        if (!grid) return;
+        const sel = document.getElementById('clash-lang-multiselect');
+        if (!sel) return;
         try {
             if (!clashSandboxLangsCache || !clashSandboxLangsCache.length) {
                 const d = await api('/clashrooms/options/sandbox-languages');
                 clashSandboxLangsCache = Array.isArray(d.languages) ? d.languages : [];
             }
             const langs = clashSandboxLangsCache;
+            sel.innerHTML = '';
             if (!langs.length) {
-                grid.innerHTML = '<p class="coc-modal-msg">No sandbox languages reported by the server.</p>';
+                const o = document.createElement('option');
+                o.disabled = true;
+                o.textContent = 'No sandbox languages from server';
+                sel.appendChild(o);
+                syncClashLangSubsetVisibility();
                 return;
             }
             const defaults = new Set(['python', 'javascript']);
-            grid.innerHTML = langs.map((l) => {
-                const checked = defaults.has(l) ? ' checked' : '';
-                return `<label class="coc-lang-cb-label"><input type="checkbox" class="clash-lang-cb" value="${escapeHtml(l)}"${checked} /><span>${escapeHtml(l)}</span></label>`;
-            }).join('');
+            langs.forEach((l) => {
+                const o = document.createElement('option');
+                o.value = l;
+                o.textContent = l;
+                if (defaults.has(l)) o.selected = true;
+                sel.appendChild(o);
+            });
         } catch (err) {
-            grid.innerHTML = `<p class="coc-modal-msg">${escapeHtml(err.message || 'Could not load languages')}</p>`;
+            sel.innerHTML = '';
+            const o = document.createElement('option');
+            o.disabled = true;
+            o.textContent = err.message || 'Could not load languages';
+            sel.appendChild(o);
         }
         syncClashLangSubsetVisibility();
     }
@@ -3266,14 +3334,13 @@
                 showToast('Select at least one clash mode', 'error');
                 return;
             }
-            const languagesAll = !!document.getElementById('clash-lang-all')?.checked;
+            const languagesAll = (document.getElementById('clash-lang-scope')?.value || 'all') === 'all';
             let allowedLanguages;
             if (!languagesAll) {
-                allowedLanguages = Array.from(document.querySelectorAll('#clash-lang-checkboxes .clash-lang-cb:checked'))
-                    .map((cb) => cb.value)
-                    .filter(Boolean);
+                const ms = document.getElementById('clash-lang-multiselect');
+                allowedLanguages = ms ? Array.from(ms.selectedOptions).map((o) => o.value).filter(Boolean) : [];
                 if (!allowedLanguages.length) {
-                    if (msg) msg.textContent = 'Pick at least one language, or turn “all languages” back on.';
+                    if (msg) msg.textContent = 'Pick at least one language in the list (Ctrl/Cmd+click), or choose “All languages”.';
                     showToast('Select at least one allowed language', 'error');
                     return;
                 }
@@ -3288,7 +3355,8 @@
                 source,
                 topic,
                 lobbyCountdownMinutes,
-                roomDurationMinutes
+                roomDurationMinutes,
+                tryPremadeFirst: source !== 'ai'
             };
             if (!languagesAll) body.allowedLanguages = allowedLanguages;
             const r = await api('/clashrooms', {
@@ -3366,7 +3434,7 @@
             setClashCreateModalOpen(true);
             refreshClashCreateLangUi().catch(() => {});
         });
-        document.getElementById('clash-lang-all')?.addEventListener('change', () => { syncClashLangSubsetVisibility(); });
+        document.getElementById('clash-lang-scope')?.addEventListener('change', () => { syncClashLangSubsetVisibility(); });
         document.getElementById('clash-create-btn')?.addEventListener('click', () => { createClashFlow(); });
         document.querySelectorAll('[data-clash-modal-close]').forEach((el) => {
             el.addEventListener('click', () => { setClashCreateModalOpen(false); });
@@ -3381,10 +3449,19 @@
                 showToast(url, 'info');
             }
         });
-        document.getElementById('clash-leave-room-btn')?.addEventListener('click', (e) => {
+        document.getElementById('clash-leave-room-btn')?.addEventListener('click', async (e) => {
             e.preventDefault();
+            const slug = currentClashSlug;
+            if (slug && state.token) {
+                try {
+                    await api('/clashrooms/' + encodeURIComponent(slug) + '/leave', {
+                        method: 'POST',
+                        body: JSON.stringify({})
+                    });
+                } catch (_) { /* still return to hub */ }
+            }
             history.pushState({}, '', clashHubPath());
-            openClashHub();
+            await openClashHub();
         });
         document.getElementById('clash-submit-btn')?.addEventListener('click', () => { submitClash(); });
         document.getElementById('clash-lang-select')?.addEventListener('change', () => {
