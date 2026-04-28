@@ -941,7 +941,7 @@
           <h3>Premade puzzle queue</h3>
           <span class="admin-count" id="admin-premade-count">0</span>
         </div>
-        <p class="clash-muted" style="margin:0 0 12px;">FIFO per mode: when a player creates a clash, one available premade for the rolled mode is used before bank/AI. Add JSON below (same shape as internal bank templates).</p>
+        <p class="clash-muted" style="margin:0 0 12px;">FIFO per mode: when a player creates a clash, one available premade for the rolled mode is used before bank/AI. Generate new premades with AI here.</p>
         <div class="admin-table-wrap">
           <table class="admin-table">
             <thead>
@@ -956,10 +956,29 @@
             <tbody id="admin-premade-tbody"></tbody>
           </table>
         </div>
-        <div style="margin-top:14px;">
-          <label class="coc-field-label" for="admin-premade-json">Add premade (JSON)</label>
-          <textarea id="admin-premade-json" class="coc-input-wide" style="min-height:140px;font-family:ui-monospace,monospace;font-size:12px;" spellcheck="false" placeholder='{"resolvedMode":"fastest","title":"Sum two numbers","statement":"Read two integers, print their sum.","samples":[{"input":"1 2","output":"3"}],"tests":[{"input":"0 0","output":"0","hidden":false}]}'></textarea>
-          <button type="button" class="btn btn-primary btn-sm" id="admin-premade-add-btn" style="margin-top:10px;">Add to queue</button>
+        <div class="admin-premade-form">
+          <div class="coc-field-row">
+            <div>
+              <label class="coc-field-label" for="admin-premade-mode">Mode</label>
+              <select id="admin-premade-mode" class="coc-select-block">
+                <option value="fastest">Fastest</option>
+                <option value="reverse">Reverse</option>
+                <option value="shortest">Shortest</option>
+              </select>
+            </div>
+            <div>
+              <label class="coc-field-label" for="admin-premade-difficulty">Difficulty</label>
+              <select id="admin-premade-difficulty" class="coc-select-block">
+                <option value="easy">Easy</option>
+                <option value="mixed" selected>Mixed</option>
+                <option value="hard">Hard</option>
+              </select>
+            </div>
+          </div>
+          <label class="coc-field-label" for="admin-premade-topic">Topic</label>
+          <input id="admin-premade-topic" class="coc-input-wide" type="text" maxlength="200" placeholder="e.g. strings, arrays, math, parsing" />
+          <p id="admin-premade-msg" class="coc-modal-msg"></p>
+          <button type="button" class="btn btn-primary btn-sm" id="admin-premade-generate-btn">Generate AI premade</button>
         </div>
         <div id="admin-clashroom-submissions-panel" class="admin-session-code-panel" style="display:none;">
           <div class="admin-panel-header" style="margin:0;">

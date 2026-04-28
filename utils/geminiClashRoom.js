@@ -46,7 +46,15 @@ async function callGeminiGenerateJson(modelId, bodyPayload) {
         } catch (_) { /* ignore */ }
         throw new Error(`Gemini API error (${res.status}): ${msg}`);
     }
-    const outer = JSON.parse(rawText);
+    if (!rawText.trim()) {
+        throw new Error('Gemini returned an empty response');
+    }
+    let outer;
+    try {
+        outer = JSON.parse(rawText);
+    } catch (err) {
+        throw new Error(`Gemini returned invalid API JSON: ${err.message}`);
+    }
     const cand = outer.candidates?.[0];
     if (!cand) throw new Error('No candidates (blocked or empty response)');
     if (cand.finishReason && ['SAFETY', 'BLOCKLIST', 'PROHIBITED_CONTENT'].includes(cand.finishReason)) {
@@ -59,7 +67,11 @@ async function callGeminiGenerateJson(modelId, bodyPayload) {
     }
     if (!txt.trim()) throw new Error('Empty model output');
     const stripped = stripJsonFence(txt);
-    return JSON.parse(stripped);
+    try {
+        return JSON.parse(stripped);
+    } catch (err) {
+        throw new Error(`Gemini returned invalid problem JSON: ${err.message}`);
+    }
 }
 
 function validateAndNormalizeClashRoom(obj, mode) {

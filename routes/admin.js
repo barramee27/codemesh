@@ -7,10 +7,13 @@ const Session = require('../models/Session');
 const ClashRoom = require('../models/ClashRoom');
 const ClashRoomSubmission = require('../models/ClashRoomSubmission');
 const ClashPremade = require('../models/ClashPremade');
+const { generateClashRoomProblem, flashModelId } = require('../utils/geminiClashRoom');
+const { listRunnerLanguages } = require('../utils/sandboxRun');
 const authMiddleware = require('../middleware/auth');
 const adminAuth = require('../middleware/adminAuth');
 
 const router = express.Router();
+const ALL_RUNNER_LANGS = listRunnerLanguages();
 
 // All admin routes require auth + admin role
 router.use(authMiddleware, adminAuth);
@@ -367,6 +370,42 @@ router.post('/clash-premades', async (req, res) => {
     } catch (err) {
         console.error('Admin add clash-premade error:', err);
         res.status(500).json({ error: err.message || 'Failed to add premade' });
+    }
+});
+
+router.post('/clash-premades/generate', async (req, res) => {
+    try {
+        const mode = String(req.body.resolvedMode || 'fastest').toLowerCase();
+        if (!['fastest', 'reverse', 'shortest'].includes(mode)) {
+            return res.status(400).json({ error: 'resolvedMode must be fastest, reverse, or shortest' });
+        }
+        const languages = Array.isArray(req.body.allowedLanguages) && req.body.allowedLanguages.length
+            ? req.body.allowedLanguages.filter((l) => ALL_RUNNER_LANGS.includes(l))
+            : ALL_RUNNER_LANGS;
+        const payload = await generateClashRoomProblem({
+            mode,
+            topic: req.body.topic && String(req.body.topic).slice(0, 200),
+            difficulty: req.body.difficulty && String(req.body.difficulty).slice(0, 50),
+            languages,
+            modelId: flashModelId()
+        });
+        const doc = await ClashPremade.create({
+            resolvedMode: mode,
+            title: payload.title,
+            statement: payload.statement,
+            samples: payload.samples,
+            tests: payload.tests,
+            allowedLanguages: payload.allowedLanguages || languages
+        });
+        res.status(201).json({
+            id: doc._id,
+            message: 'AI premade generated and added to queue',
+            premade: doc
+        });
+    } catch (err) {
+        console.error('Admin generate clash-premade error:', err);
+        const status = err.message && err.message.includes('GEMINI_API_KEY') ? 503 : 400;
+        res.status(status).json({ error: err.message || 'Failed to generate premade' });
     }
 });
 

@@ -2490,21 +2490,29 @@
             }
         });
 
-        document.getElementById('admin-premade-add-btn')?.addEventListener('click', async () => {
-            const ta = document.getElementById('admin-premade-json');
-            const raw = (ta && ta.value || '').trim();
-            if (!raw) {
-                showToast('Paste JSON for the premade puzzle', 'error');
-                return;
-            }
+        document.getElementById('admin-premade-generate-btn')?.addEventListener('click', async () => {
+            const btn = document.getElementById('admin-premade-generate-btn');
+            const msg = document.getElementById('admin-premade-msg');
+            const body = {
+                resolvedMode: document.getElementById('admin-premade-mode')?.value || 'fastest',
+                difficulty: document.getElementById('admin-premade-difficulty')?.value || 'mixed',
+                topic: document.getElementById('admin-premade-topic')?.value || ''
+            };
+            if (btn) btn.disabled = true;
+            if (msg) msg.textContent = 'Generating premade with AI…';
             try {
-                const obj = JSON.parse(raw);
-                await api('/admin/clash-premades', { method: 'POST', body: JSON.stringify(obj) });
-                showToast('Premade added to queue', 'success');
-                if (ta) ta.value = '';
+                const res = await api('/admin/clash-premades/generate', {
+                    method: 'POST',
+                    body: JSON.stringify(body)
+                });
+                showToast(res.message || 'AI premade added to queue', 'success');
+                if (msg) msg.textContent = res.premade && res.premade.title ? `Added: ${res.premade.title}` : 'Added to queue.';
                 loadAdminClashPremades();
             } catch (err) {
-                showToast(err.message || 'Invalid JSON or request failed', 'error');
+                if (msg) msg.textContent = err.message || 'Failed to generate premade';
+                showToast(err.message || 'Failed to generate premade', 'error');
+            } finally {
+                if (btn) btn.disabled = false;
             }
         });
 

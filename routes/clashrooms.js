@@ -125,6 +125,18 @@ function isJoinPhase(room) {
     return false;
 }
 
+async function ensureParticipantForPlay(room, userId) {
+    const ids = (room.participantIds || []).map((id) => String(id));
+    if (ids.includes(userId)) return;
+    if (ids.length >= (room.maxPlayers || 50)) {
+        const err = new Error('Room is full');
+        err.statusCode = 400;
+        throw err;
+    }
+    room.participantIds.push(userId);
+    await room.save();
+}
+
 function problemHidden(room) {
     return ['preparing', 'lobby', 'countdown'].includes(room.phase);
 }
@@ -363,19 +375,29 @@ router.post('/', authMiddleware, registeredUserOnly, createLimiter, async (req, 
         }
 
         const flashModel = flashModelId();
-        const payload = await generateClashRoomProblem({
-            mode: resolvedMode,
-            topic: req.body.topic && String(req.body.topic).slice(0, 200),
-            difficulty: req.body.difficulty && String(req.body.difficulty).slice(0, 50),
-            languages: languagesAll ? ALL_RUNNER_LANGS : langs,
-            modelId: flashModel
-        });
+        let payload;
+        try {
+            payload = await generateClashRoomProblem({
+                mode: resolvedMode,
+                topic: req.body.topic && String(req.body.topic).slice(0, 200),
+                difficulty: req.body.difficulty && String(req.body.difficulty).slice(0, 50),
+                languages: languagesAll ? ALL_RUNNER_LANGS : langs,
+                modelId: flashModel
+            });
+        } catch (genErr) {
+            if (sourceRaw === 'ai') {
+                throw new Error(`AI generation failed: ${genErr.message || 'invalid JSON from model'}`);
+            }
+            payload = pickRandomTemplate(resolvedMode);
+            useBank = true;
+            effectiveSourceKind = 'bank';
+        }
 
         const room = await ClashRoom.create({
             slug,
             resolvedMode,
-            phase: 'preparing',
-            status: 'verifying',
+            phase: useBank ? 'lobby' : 'preparing',
+            status: useBank ? 'ready' : 'verifying',
             allowedModesPick: modesPick,
             languagesAll,
             participantIds: [req.user.id],
@@ -390,19 +412,23 @@ router.post('/', authMiddleware, registeredUserOnly, createLimiter, async (req, 
             timeLimitMs: Math.min(Number(req.body.timeLimitMs) || 8000, 15000),
             roomDurationMs,
             createdBy: req.user.id,
-            aiModel: flashModel
+            aiModel: useBank ? undefined : flashModel
         });
 
-        setImmediate(() => {
-            runProVerification(room._id).catch((e) => console.error('clashrooms verify bg', e));
-        });
+        if (!useBank) {
+            setImmediate(() => {
+                runProVerification(room._id).catch((e) => console.error('clashrooms verify bg', e));
+            });
+        }
 
         return res.status(201).json({
             slug: room.slug,
             phase: room.phase,
             status: room.status,
             sourceKind: effectiveSourceKind,
-            message: 'Room created. AI is preparing a puzzle — invite players; nothing is revealed until the match starts.',
+            message: useBank
+                ? 'AI was unavailable, so a bank puzzle was used. Invite players — countdown starts automatically.'
+                : 'Room created. AI is preparing a puzzle — invite players; countdown starts automatically when ready.',
             joinPath: `/clash/${room.slug}`
         });
     } catch (err) {
@@ -673,10 +699,7 @@ router.post('/:slug/run-tests', authMiddleware, registeredUserOnly, submitLimite
             return res.status(400).json({ error: 'The match timer has ended' });
         }
 
-        const ids = (room.participantIds || []).map((id) => String(id));
-        if (!ids.includes(req.user.id)) {
-            return res.status(403).json({ error: 'Join this room before running tests (registered account).' });
-        }
+        await ensureParticipantForPlay(room, req.user.id);
 
         const { language, code } = req.body;
         if (!language || code == null) {
@@ -752,7 +775,7 @@ router.post('/:slug/run-tests', authMiddleware, registeredUserOnly, submitLimite
         });
     } catch (err) {
         console.error('clashrooms run-tests:', err);
-        res.status(500).json({ error: err.message || 'Run tests failed' });
+        res.status(err.statusCode || 500).json({ error: err.message || 'Run tests failed' });
     }
 });
 
@@ -770,10 +793,7 @@ router.post('/:slug/submit', authMiddleware, registeredUserOnly, submitLimiter, 
             return res.status(400).json({ error: 'The match timer has ended' });
         }
 
-        const ids = (room.participantIds || []).map((id) => String(id));
-        if (!ids.includes(req.user.id)) {
-            return res.status(403).json({ error: 'Join this room before submitting (registered account).' });
-        }
+        await ensureParticipantForPlay(room, req.user.id);
 
         const { language, code } = req.body;
         if (!language || code == null) {
@@ -953,7 +973,7 @@ router.post('/:slug/submit', authMiddleware, registeredUserOnly, submitLimiter, 
         });
     } catch (err) {
         console.error('clashrooms submit:', err);
-        res.status(500).json({ error: err.message || 'Submit failed' });
+        res.status(err.statusCode || 500).json({ error: err.message || 'Submit failed' });
     }
 });
 
