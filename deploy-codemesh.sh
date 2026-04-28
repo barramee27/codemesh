@@ -27,7 +27,7 @@ echo "Deploying CodeMesh to ${REMOTE}:${DEST}"
 echo "Domain: https://codemesh.org/"
 echo ""
 
-ssh "${REMOTE}" "set -e; cd '${DEST}' && git pull origin main && npm install --production && pm2 restart codemesh && pm2 save && pm2 status codemesh"
+ssh "${REMOTE}" "set -e; cd '${DEST}' && git fetch origin && git reset --hard origin/main && npm install --production && pm2 restart codemesh && pm2 save && pm2 status codemesh"
 
 echo ""
 echo "Done. If Clash is new on this server, edit Gemini keys on the VPS:"
