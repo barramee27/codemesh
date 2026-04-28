@@ -2523,6 +2523,45 @@ select.input-full {
   color: var(--coc-text);
 }
 
+.coc-lang-section-sub {
+  margin-top: -6px;
+  margin-bottom: 10px;
+}
+
+.coc-lang-subset-wrap {
+  margin-top: 12px;
+}
+
+.coc-lang-pick-hint {
+  margin-top: 0;
+  margin-bottom: 10px;
+}
+
+.coc-lang-checkbox-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 14px;
+  max-height: 220px;
+  overflow-y: auto;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--coc-border);
+  background: #0a0e14;
+}
+
+.coc-lang-cb-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--coc-text);
+  cursor: pointer;
+}
+
+.coc-lang-cb-label input {
+  flex-shrink: 0;
+}
+
 /* Room shell */
 .coc-room {
   flex: 1;

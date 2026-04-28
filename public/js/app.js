@@ -48,8 +48,41 @@
             headers: { ...headers, ...options.headers }
         });
 
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error || 'Request failed');
+        const raw = await res.text();
+        const ct = (res.headers.get('content-type') || '').toLowerCase();
+        let data = null;
+        if (raw.length) {
+            const looksJson = ct.includes('application/json')
+                || raw.trimStart().startsWith('{')
+                || raw.trimStart().startsWith('[');
+            if (looksJson) {
+                try {
+                    data = JSON.parse(raw);
+                } catch (_) {
+                    const snippet = raw.slice(0, 160).replace(/\s+/g, ' ').trim();
+                    throw new Error(
+                        res.ok
+                            ? 'Invalid JSON from server'
+                            : `Server error (${res.status})${snippet ? `: ${snippet}` : ''}`
+                    );
+                }
+            } else {
+                const snippet = raw.slice(0, 200).replace(/\s+/g, ' ').trim();
+                throw new Error(
+                    snippet
+                        ? `Server error (${res.status}): ${snippet}`
+                        : `Server error (${res.status}) — non-JSON response`
+                );
+            }
+        } else {
+            data = {};
+            if (!res.ok) {
+                throw new Error(
+                    `Empty response (${res.status}). The server or proxy may have timed out — try “Bank only”, shorten the request, or retry in a moment.`
+                );
+            }
+        }
+        if (!res.ok) throw new Error((data && data.error) || `Request failed (${res.status})`);
         return data;
     }
 
@@ -336,6 +369,7 @@
     let clashTickInterval = null;
     let clashLobbyTickInterval = null;
     let clashMonacoEditor = null;
+    let clashSandboxLangsCache = null;
 
     function isClashCodemeshHost() {
         return window.location.hostname.replace(/^www\./i, '') === 'clash.codemesh.org';
@@ -3191,6 +3225,36 @@
         }
     }
 
+    function syncClashLangSubsetVisibility() {
+        const all = !!document.getElementById('clash-lang-all')?.checked;
+        const wrap = document.getElementById('clash-lang-subset-wrap');
+        if (wrap) wrap.style.display = all ? 'none' : '';
+    }
+
+    async function refreshClashCreateLangUi() {
+        const grid = document.getElementById('clash-lang-checkboxes');
+        if (!grid) return;
+        try {
+            if (!clashSandboxLangsCache || !clashSandboxLangsCache.length) {
+                const d = await api('/clashrooms/options/sandbox-languages');
+                clashSandboxLangsCache = Array.isArray(d.languages) ? d.languages : [];
+            }
+            const langs = clashSandboxLangsCache;
+            if (!langs.length) {
+                grid.innerHTML = '<p class="coc-modal-msg">No sandbox languages reported by the server.</p>';
+                return;
+            }
+            const defaults = new Set(['python', 'javascript']);
+            grid.innerHTML = langs.map((l) => {
+                const checked = defaults.has(l) ? ' checked' : '';
+                return `<label class="coc-lang-cb-label"><input type="checkbox" class="clash-lang-cb" value="${escapeHtml(l)}"${checked} /><span>${escapeHtml(l)}</span></label>`;
+            }).join('');
+        } catch (err) {
+            grid.innerHTML = `<p class="coc-modal-msg">${escapeHtml(err.message || 'Could not load languages')}</p>`;
+        }
+        syncClashLangSubsetVisibility();
+    }
+
     async function createClashFlow() {
         const msg = document.getElementById('clash-create-msg');
         if (msg) msg.textContent = 'Creating room…';
@@ -3203,20 +3267,33 @@
                 return;
             }
             const languagesAll = !!document.getElementById('clash-lang-all')?.checked;
+            let allowedLanguages;
+            if (!languagesAll) {
+                allowedLanguages = Array.from(document.querySelectorAll('#clash-lang-checkboxes .clash-lang-cb:checked'))
+                    .map((cb) => cb.value)
+                    .filter(Boolean);
+                if (!allowedLanguages.length) {
+                    if (msg) msg.textContent = 'Pick at least one language, or turn “all languages” back on.';
+                    showToast('Select at least one allowed language', 'error');
+                    return;
+                }
+            }
             const source = document.getElementById('clash-source')?.value || 'auto';
             const topic = document.getElementById('clash-create-topic')?.value || '';
             const lobbyCountdownMinutes = Number(document.getElementById('clash-lobby-countdown')?.value) || 5;
             const roomDurationMinutes = Number(document.getElementById('clash-create-duration')?.value) || 15;
+            const body = {
+                allowedModes,
+                languagesAll,
+                source,
+                topic,
+                lobbyCountdownMinutes,
+                roomDurationMinutes
+            };
+            if (!languagesAll) body.allowedLanguages = allowedLanguages;
             const r = await api('/clashrooms', {
                 method: 'POST',
-                body: JSON.stringify({
-                    allowedModes,
-                    languagesAll,
-                    source,
-                    topic,
-                    lobbyCountdownMinutes,
-                    roomDurationMinutes
-                })
+                body: JSON.stringify(body)
             });
             if (msg) msg.textContent = r.message || ('Room ' + r.slug);
             setClashCreateModalOpen(false);
@@ -3285,7 +3362,11 @@
     }
 
     function initClashUi() {
-        document.getElementById('clash-open-create-modal')?.addEventListener('click', () => { setClashCreateModalOpen(true); });
+        document.getElementById('clash-open-create-modal')?.addEventListener('click', () => {
+            setClashCreateModalOpen(true);
+            refreshClashCreateLangUi().catch(() => {});
+        });
+        document.getElementById('clash-lang-all')?.addEventListener('change', () => { syncClashLangSubsetVisibility(); });
         document.getElementById('clash-create-btn')?.addEventListener('click', () => { createClashFlow(); });
         document.querySelectorAll('[data-clash-modal-close]').forEach((el) => {
             el.addEventListener('click', () => { setClashCreateModalOpen(false); });

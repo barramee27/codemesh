@@ -110,10 +110,16 @@
             <span class="coc-mode-desc">Shortest source code wins.</span>
           </label>
         </div>
+        <label class="coc-field-label">Programming languages allowed</label>
+        <p class="coc-modal-sub coc-lang-section-sub">Like CodinGame: allow the full sandbox list, or restrict to specific languages.</p>
         <label class="coc-field-label coc-check-all-lang">
           <input type="checkbox" id="clash-lang-all" checked />
           <span>All languages supported by the sandbox</span>
         </label>
+        <div id="clash-lang-subset-wrap" class="coc-lang-subset-wrap" style="display:none;">
+          <p class="coc-modal-sub coc-lang-pick-hint">Pick one or more — players choose one of these when coding.</p>
+          <div id="clash-lang-checkboxes" class="coc-lang-checkbox-grid" role="group" aria-label="Allowed languages"></div>
+        </div>
         <label class="coc-field-label">Puzzle source</label>
         <select id="clash-source" class="coc-select-wide">
           <option value="auto">Random: bank or new AI</option>

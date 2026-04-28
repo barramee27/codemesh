@@ -341,6 +341,11 @@ router.get('/', async (req, res) => {
     }
 });
 
+/** GET /api/clashrooms/options/sandbox-languages — for create-clash modal (before /:slug) */
+router.get('/options/sandbox-languages', (req, res) => {
+    res.json({ languages: ALL_RUNNER_LANGS });
+});
+
 function buildRoomDetailPayload(room, reqUserId) {
     const ownerId = room.createdBy && room.createdBy._id ? room.createdBy._id.toString() : String(room.createdBy);
     const isOwner = !!(reqUserId && ownerId === reqUserId);
