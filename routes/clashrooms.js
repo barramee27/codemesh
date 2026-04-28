@@ -659,6 +659,103 @@ router.post('/:slug/start-now', authMiddleware, async (req, res) => {
     }
 });
 
+/** POST /api/clashrooms/:slug/run-tests — dry run all tests without saving a submission. */
+router.post('/:slug/run-tests', authMiddleware, registeredUserOnly, submitLimiter, async (req, res) => {
+    try {
+        await pulseRoomBySlug(req.params.slug);
+        const room = await ClashRoom.findOne({ slug: req.params.slug });
+        if (!room) return res.status(404).json({ error: 'Room not found' });
+
+        if (room.phase !== 'live' || room.status !== 'ready') {
+            return res.status(400).json({ error: 'Run tests is only open during the live phase.' });
+        }
+        if (room.endsAt && new Date() >= new Date(room.endsAt)) {
+            return res.status(400).json({ error: 'The match timer has ended' });
+        }
+
+        const ids = (room.participantIds || []).map((id) => String(id));
+        if (!ids.includes(req.user.id)) {
+            return res.status(403).json({ error: 'Join this room before running tests (registered account).' });
+        }
+
+        const { language, code } = req.body;
+        if (!language || code == null) {
+            return res.status(400).json({ error: 'language and code are required' });
+        }
+        if (!languageAllowedDoc(room, language)) {
+            return res.status(400).json({ error: 'Language not allowed for this room' });
+        }
+
+        const tests = room.tests || [];
+        if (!tests.length) return res.status(500).json({ error: 'Room has no tests' });
+
+        const codeStr = String(code);
+        const testResults = [];
+        const failures = [];
+        let totalTimeMs = 0;
+        let accepted = true;
+
+        for (let i = 0; i < tests.length; i++) {
+            const t = tests[i];
+            const stdin = t.input == null ? '' : String(t.input);
+            const expected = normalizeProgramOutput(t.output);
+            const r = await executeCodeWithStdin({
+                code: codeStr,
+                language,
+                stdin,
+                timeLimitMs: room.timeLimitMs || 8000
+            });
+
+            const wall = typeof r.execTimeMs === 'number' ? r.execTimeMs : 0;
+            totalTimeMs += wall;
+
+            let pass = false;
+            if (r.ok && !r.timedOut && Number(r.code) === 0) {
+                pass = normalizeProgramOutput(r.stdout || '') === expected;
+            }
+            if (!pass) accepted = false;
+
+            testResults.push({
+                index: i,
+                pass,
+                hidden: !!t.hidden,
+                timeMs: wall,
+                stdoutSnippet: truncate(r.stdout || '', 400),
+                stderrSnippet: truncate(r.stderr || r.error || '', 500)
+            });
+
+            if (!pass && !t.hidden) {
+                failures.push({
+                    index: i,
+                    inputPreview: truncate(stdin, 800),
+                    expected: truncate(expected, 2000),
+                    actual: truncate(r.stdout || '', 2000),
+                    stderr: truncate(r.stderr || r.error || '', 1500)
+                });
+            }
+        }
+
+        return res.json({
+            accepted,
+            totalTimeMs,
+            sourceByteLength: Buffer.byteLength(codeStr.trim(), 'utf8'),
+            charCount: Buffer.byteLength(codeStr.trim(), 'utf8'),
+            mode: room.resolvedMode,
+            testResults: testResults.map((tr) => ({
+                index: tr.index,
+                pass: tr.pass,
+                hidden: tr.hidden,
+                timeMs: tr.timeMs
+            })),
+            failures,
+            dryRun: true
+        });
+    } catch (err) {
+        console.error('clashrooms run-tests:', err);
+        res.status(500).json({ error: err.message || 'Run tests failed' });
+    }
+});
+
 /** POST /api/clashrooms/:slug/submit */
 router.post('/:slug/submit', authMiddleware, registeredUserOnly, submitLimiter, async (req, res) => {
     try {

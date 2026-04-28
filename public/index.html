@@ -216,6 +216,9 @@
           <div id="clash-editor-block" class="coc-editor-stack">
             <textarea id="clash-code-input" class="coc-code-textarea" spellcheck="false" rows="16"></textarea>
           </div>
+          <footer class="coc-editor-footer">
+            <span id="clash-char-counter">0 chars</span>
+          </footer>
         </section>
         <section class="coc-ide-cell coc-ide-leaderboard">
           <header class="coc-ide-cell-h">Leaderboard</header>
@@ -224,10 +227,12 @@
         <section class="coc-ide-cell coc-ide-submit">
           <header class="coc-ide-cell-h">Actions</header>
           <div id="clash-result" class="coc-submit-output" style="display:none"></div>
-          <p class="coc-submit-hint">Submit runs your program on all tests. Use the match timer in the bar above.</p>
+          <p class="coc-submit-hint">Run all tests checks your code without ranking it. Submit saves your official attempt.</p>
+          <button type="button" id="clash-run-tests-btn" class="coc-btn-run-tests">Run all tests</button>
           <button type="button" id="clash-submit-btn" class="coc-btn-submit-big">Submit</button>
         </section>
       </div>
+      <div id="clash-report-panel" class="coc-report-panel" style="display:none;"></div>
     </div>
   </div>
 

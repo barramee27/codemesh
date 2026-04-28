@@ -2825,6 +2825,23 @@
         if (ta) ta.style.display = '';
     }
 
+    function getClashCodeValue() {
+        const ta = document.getElementById('clash-code-input');
+        if (clashMonacoEditor) {
+            try {
+                return clashMonacoEditor.getValue();
+            } catch (_) { /* use textarea */ }
+        }
+        return (ta && ta.value) || '';
+    }
+
+    function updateClashCharCounter() {
+        const el = document.getElementById('clash-char-counter');
+        if (!el) return;
+        const n = getClashCodeValue().trim().length;
+        el.textContent = `${n} char${n === 1 ? '' : 's'}`;
+    }
+
     async function initClashMonacoLive() {
         const container = document.getElementById('clash-monaco-container');
         const ta = document.getElementById('clash-code-input');
@@ -2845,7 +2862,9 @@
             ta.style.display = 'none';
             clashMonacoEditor.onDidChangeModelContent(() => {
                 ta.value = clashMonacoEditor.getValue();
+                updateClashCharCounter();
             });
+            updateClashCharCounter();
         } catch (e) {
             console.warn('Clash Monaco:', e);
         }
@@ -2938,6 +2957,7 @@
         const langSel = document.getElementById('clash-lang-select');
         const editorBlock = document.getElementById('clash-editor-block');
         const submitBtn = document.getElementById('clash-submit-btn');
+        const runTestsBtn = document.getElementById('clash-run-tests-btn');
         const playground = document.getElementById('clash-playground');
         const shareInput = document.getElementById('clash-share-url-input');
         const liveSub = document.getElementById('clash-live-subtitle');
@@ -3168,6 +3188,10 @@
         if (submitBtn) {
             submitBtn.style.display = canEdit ? '' : 'none';
         }
+        if (runTestsBtn) {
+            runTestsBtn.style.display = canEdit ? '' : 'none';
+        }
+        updateClashCharCounter();
 
         if (problemVisible && canEdit) {
             if (!clashMonacoEditor) initClashMonacoLive();
@@ -3216,6 +3240,11 @@
         if (result) {
             result.style.display = 'none';
             result.innerHTML = '';
+        }
+        const report = document.getElementById('clash-report-panel');
+        if (report) {
+            report.style.display = 'none';
+            report.innerHTML = '';
         }
         try {
             const c = await api('/clashrooms/' + encodeURIComponent(slug));
@@ -3288,6 +3317,86 @@
                 : '<p class="coc-aside-muted">No accepted submissions yet.</p>';
         } catch (e) {
             el.textContent = 'Could not load leaderboard.';
+        }
+    }
+
+    function renderClashRunOutput(res, title) {
+        const el = document.getElementById('clash-result');
+        if (!el) return;
+        const rows = (res.testResults || []).map((t) => {
+            const name = t.hidden ? `Hidden test #${t.index + 1}` : `Test #${t.index + 1}`;
+            const mark = t.pass ? '<span class="clash-ok">PASS</span>' : '<span class="clash-bad">FAIL</span>';
+            return `<li>${mark} ${escapeHtml(name)} <span class="clash-muted">${Number(t.timeMs || 0)} ms</span></li>`;
+        }).join('');
+        let html = `<p><strong>${escapeHtml(title)}</strong> ${res.accepted ? '<span class="clash-ok">All passed</span>' : '<span class="clash-bad">Some failed</span>'}</p>`;
+        html += `<p class="clash-muted">Total time ${Number(res.totalTimeMs || 0)} ms · ${Number(res.charCount || 0)} characters</p>`;
+        html += rows ? `<ul class="coc-test-result-list">${rows}</ul>` : '';
+        (res.failures || []).forEach((f) => {
+            html += `<div class="clash-fail"><h4>Test #${f.index + 1}</h4>`;
+            if (f.inputPreview) html += `<p class="clash-muted">Input (preview)</p><pre class="clash-io">${escapeHtml(f.inputPreview)}</pre>`;
+            html += `<p><strong>Expected</strong></p><pre class="clash-io">${escapeHtml(f.expected)}</pre>`;
+            html += `<p><strong>Your output</strong></p><pre class="clash-io">${escapeHtml(f.actual)}</pre>`;
+            if (f.stderr) html += `<p><strong>Stderr</strong></p><pre class="clash-io">${escapeHtml(f.stderr)}</pre>`;
+            html += '</div>';
+        });
+        el.style.display = '';
+        el.innerHTML = html;
+    }
+
+    async function renderClashReport(slug, res) {
+        const playground = document.getElementById('clash-playground');
+        const report = document.getElementById('clash-report-panel');
+        if (!report) return;
+        if (playground) playground.style.display = 'none';
+        let leaderboard = [];
+        try {
+            const data = await api('/clashrooms/' + encodeURIComponent(slug) + '/leaderboard');
+            leaderboard = data.leaderboard || [];
+        } catch (_) { /* report still renders */ }
+        const rows = leaderboard.length
+            ? leaderboard.map((r) => `<tr><td>${r.rank}</td><td>${escapeHtml(r.username)}</td><td>${Number(r.totalTimeMs || 0)}</td><td>${Number(r.charCount || 0)}</td><td>${escapeHtml(r.language || '')}</td></tr>`).join('')
+            : '<tr><td colspan="5" class="coc-aside-muted">No leaderboard rows yet.</td></tr>';
+        report.innerHTML = `
+            <div class="coc-report-hero">
+                <h2 class="coc-report-title">${res.accepted ? 'Accepted' : 'Submitted'}</h2>
+                <p>${res.accepted ? 'Your code passed every test.' : 'Your latest submit did not pass all tests.'}</p>
+                <p class="coc-report-stats">
+                    <span>Time ${Number(res.totalTimeMs || 0)} ms</span>
+                    <span>Chars ${Number(res.charCount || 0)}</span>
+                    <span>Lang ${escapeHtml(res.language || document.getElementById('clash-lang-select')?.value || '')}</span>
+                </p>
+            </div>
+            <table class="clash-table"><thead><tr><th>#</th><th>User</th><th>Time ms</th><th>Chars</th><th>Lang</th></tr></thead><tbody>${rows}</tbody></table>
+            <div class="coc-report-actions">
+                <button type="button" class="btn btn-secondary" id="clash-report-back-btn">Back to clash</button>
+                <button type="button" class="btn btn-primary" id="clash-report-home-btn">Clash home</button>
+            </div>`;
+        report.style.display = '';
+        report.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+
+    async function runClashTests() {
+        const slug = currentClashSlug;
+        if (!slug) return;
+        const lang = document.getElementById('clash-lang-select')?.value;
+        const code = getClashCodeValue();
+        if (!code.trim()) {
+            showToast('Paste your solution first', 'error');
+            return;
+        }
+        const btn = document.getElementById('clash-run-tests-btn');
+        if (btn) btn.disabled = true;
+        try {
+            const res = await api('/clashrooms/' + encodeURIComponent(slug) + '/run-tests', {
+                method: 'POST',
+                body: JSON.stringify({ language: lang, code })
+            });
+            renderClashRunOutput(res, 'Run all tests');
+            showToast(res.accepted ? 'All tests passed' : 'Some tests failed', res.accepted ? 'success' : 'info');
+        } catch (err) {
+            showToast(err.message || 'Run tests failed', 'error');
+        } finally {
+            if (btn) btn.disabled = false;
         }
     }
 
@@ -3387,43 +3496,29 @@
         const slug = currentClashSlug;
         if (!slug) return;
         const lang = document.getElementById('clash-lang-select')?.value;
-        const ta = document.getElementById('clash-code-input');
-        let code = (ta && ta.value) || '';
-        if (clashMonacoEditor) {
-            try {
-                code = clashMonacoEditor.getValue();
-            } catch (_) { /* use textarea */ }
-        }
+        const code = getClashCodeValue();
         if (!code.trim()) {
             showToast('Paste your solution first', 'error');
             return;
         }
+        const btn = document.getElementById('clash-submit-btn');
+        if (btn) btn.disabled = true;
         try {
             const res = await api('/clashrooms/' + encodeURIComponent(slug) + '/submit', {
                 method: 'POST',
                 body: JSON.stringify({ language: lang, code })
             });
-            const el = document.getElementById('clash-result');
-            if (!el) return;
-            el.style.display = '';
             if (res.accepted) {
-                el.innerHTML = `<p class="clash-ok">All tests passed.</p><p class="clash-muted">Total time ${res.totalTimeMs} ms · ${res.charCount} characters</p>`;
+                await renderClashReport(slug, { ...res, language: lang });
             } else {
-                let html = '<p class="clash-bad">Some tests failed.</p>';
-                (res.failures || []).forEach((f) => {
-                    html += `<div class="clash-fail"><h4>Test #${f.index + 1}</h4>`;
-                    if (f.inputPreview) html += `<p class="clash-muted">Input (preview)</p><pre class="clash-io">${escapeHtml(f.inputPreview)}</pre>`;
-                    html += `<p><strong>Expected</strong></p><pre class="clash-io">${escapeHtml(f.expected)}</pre>`;
-                    html += `<p><strong>Your output</strong></p><pre class="clash-io">${escapeHtml(f.actual)}</pre>`;
-                    if (f.stderr) html += `<p><strong>Stderr</strong></p><pre class="clash-io">${escapeHtml(f.stderr)}</pre>`;
-                    html += '</div>';
-                });
-                el.innerHTML = html;
+                renderClashRunOutput(res, 'Submit');
             }
             showToast(res.accepted ? 'Accepted!' : 'Try again', res.accepted ? 'success' : 'info');
             await loadClashLeaderboard(slug);
         } catch (err) {
             showToast(err.message || 'Submit failed', 'error');
+        } finally {
+            if (btn) btn.disabled = false;
         }
     }
 
@@ -3474,6 +3569,8 @@
             await openClashHub();
         });
         document.getElementById('clash-submit-btn')?.addEventListener('click', () => { submitClash(); });
+        document.getElementById('clash-run-tests-btn')?.addEventListener('click', () => { runClashTests(); });
+        document.getElementById('clash-code-input')?.addEventListener('input', () => { updateClashCharCounter(); });
         document.getElementById('clash-lang-select')?.addEventListener('change', () => {
             if (!clashMonacoEditor || !window.monaco) return;
             const v = document.getElementById('clash-lang-select')?.value;
@@ -3496,6 +3593,18 @@
             if (e.target.closest('#clash-start-btn, #clash-start-sidebar-btn')) {
                 e.preventDefault();
                 startClash();
+            }
+        });
+        document.getElementById('clash-report-panel')?.addEventListener('click', (e) => {
+            if (e.target.closest('#clash-report-back-btn')) {
+                e.preventDefault();
+                if (currentClashSlug) openClashRoom(currentClashSlug);
+                return;
+            }
+            if (e.target.closest('#clash-report-home-btn')) {
+                e.preventDefault();
+                history.pushState({}, '', clashHubPath());
+                openClashHub();
             }
         });
         document.getElementById('clash-lobby-lang-select')?.addEventListener('change', () => {
