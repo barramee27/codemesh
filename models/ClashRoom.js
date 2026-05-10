@@ -38,7 +38,7 @@ const clashRoomSchema = new mongoose.Schema({
     countdownEndsAt: { type: Date },
     roomDurationMs: { type: Number, default: 900000 },
     timeLimitMs: { type: Number, default: 8000 },
-    sourceKind: { type: String, enum: ['auto', 'bank', 'ai', 'premade'] },
+    sourceKind: { type: String, enum: ['auto', 'bank', 'ai'] },
     title: { type: String, required: true, trim: true },
     statement: { type: String, default: '' },
     samples: [ioPairSchema],

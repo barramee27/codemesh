@@ -41,13 +41,13 @@ router.post('/join-or-create', authMiddleware, async (req, res) => {
         session = new Session({
             sessionId: raw,
             title: (req.body.title && String(req.body.title).trim()) || raw,
-            language: 'javascript',
+            language: 'plaintext',
             code: '',
             files: [{
                 id: fileId,
-                name: 'main.js',
+                name: 'snippet.txt',
                 content: '',
-                language: 'javascript'
+                language: 'plaintext'
             }],
             owner: req.user.id,
             isPublic: true
@@ -88,7 +88,7 @@ router.post('/', authMiddleware, async (req, res) => {
         const session = new Session({
             sessionId,
             title: title || 'Untitled Session',
-            language: language || 'javascript',
+            language: language || 'plaintext',
             code: '',
             owner: req.user.id
         });

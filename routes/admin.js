@@ -6,14 +6,10 @@ const User = require('../models/User');
 const Session = require('../models/Session');
 const ClashRoom = require('../models/ClashRoom');
 const ClashRoomSubmission = require('../models/ClashRoomSubmission');
-const ClashPremade = require('../models/ClashPremade');
-const { generateClashRoomProblem, flashModelId } = require('../utils/geminiClashRoom');
-const { listRunnerLanguages } = require('../utils/sandboxRun');
 const authMiddleware = require('../middleware/auth');
 const adminAuth = require('../middleware/adminAuth');
 
 const router = express.Router();
-const ALL_RUNNER_LANGS = listRunnerLanguages();
 
 // All admin routes require auth + admin role
 router.use(authMiddleware, adminAuth);
@@ -328,94 +324,6 @@ router.delete('/clashrooms/:slug', async (req, res) => {
     } catch (err) {
         console.error('Admin delete clashroom error:', err);
         res.status(500).json({ error: 'Failed to delete room' });
-    }
-});
-
-// ─── Clash premade queue (FIFO for new private rooms) ───
-router.get('/clash-premades', async (req, res) => {
-    try {
-        const rows = await ClashPremade.find({}).sort({ createdAt: -1 }).limit(200).lean();
-        res.json(rows);
-    } catch (err) {
-        console.error('Admin list clash-premades error:', err);
-        res.status(500).json({ error: 'Failed to list premades' });
-    }
-});
-
-router.post('/clash-premades', async (req, res) => {
-    try {
-        const mode = String(req.body.resolvedMode || '').toLowerCase();
-        if (!['fastest', 'reverse', 'shortest'].includes(mode)) {
-            return res.status(400).json({ error: 'resolvedMode must be fastest, reverse, or shortest' });
-        }
-        const title = String(req.body.title || '').trim();
-        if (!title) return res.status(400).json({ error: 'title is required' });
-        const tests = Array.isArray(req.body.tests) ? req.body.tests : [];
-        if (!tests.length) return res.status(400).json({ error: 'tests must be a non-empty array' });
-        const doc = await ClashPremade.create({
-            resolvedMode: mode,
-            title,
-            statement: String(req.body.statement || ''),
-            samples: Array.isArray(req.body.samples) ? req.body.samples : [],
-            tests: tests.map((t) => ({
-                input: String(t.input != null ? t.input : ''),
-                output: String(t.output != null ? t.output : ''),
-                hidden: !!t.hidden
-            })),
-            allowedLanguages: Array.isArray(req.body.allowedLanguages)
-                ? req.body.allowedLanguages.filter(Boolean).map(String)
-                : []
-        });
-        res.status(201).json({ id: doc._id, message: 'Premade added to queue' });
-    } catch (err) {
-        console.error('Admin add clash-premade error:', err);
-        res.status(500).json({ error: err.message || 'Failed to add premade' });
-    }
-});
-
-router.post('/clash-premades/generate', async (req, res) => {
-    try {
-        const mode = String(req.body.resolvedMode || 'fastest').toLowerCase();
-        if (!['fastest', 'reverse', 'shortest'].includes(mode)) {
-            return res.status(400).json({ error: 'resolvedMode must be fastest, reverse, or shortest' });
-        }
-        const languages = Array.isArray(req.body.allowedLanguages) && req.body.allowedLanguages.length
-            ? req.body.allowedLanguages.filter((l) => ALL_RUNNER_LANGS.includes(l))
-            : ALL_RUNNER_LANGS;
-        const payload = await generateClashRoomProblem({
-            mode,
-            topic: req.body.topic && String(req.body.topic).slice(0, 200),
-            difficulty: req.body.difficulty && String(req.body.difficulty).slice(0, 50),
-            languages,
-            modelId: flashModelId()
-        });
-        const doc = await ClashPremade.create({
-            resolvedMode: mode,
-            title: payload.title,
-            statement: payload.statement,
-            samples: payload.samples,
-            tests: payload.tests,
-            allowedLanguages: payload.allowedLanguages || languages
-        });
-        res.status(201).json({
-            id: doc._id,
-            message: 'AI premade generated and added to queue',
-            premade: doc
-        });
-    } catch (err) {
-        console.error('Admin generate clash-premade error:', err);
-        const status = err.message && err.message.includes('GEMINI_API_KEY') ? 503 : 400;
-        res.status(status).json({ error: err.message || 'Failed to generate premade' });
-    }
-});
-
-router.delete('/clash-premades/:id', async (req, res) => {
-    try {
-        await ClashPremade.deleteOne({ _id: req.params.id });
-        res.json({ ok: true });
-    } catch (err) {
-        console.error('Admin delete clash-premade error:', err);
-        res.status(500).json({ error: 'Failed to delete premade' });
     }
 });
 

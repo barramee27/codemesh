@@ -2159,7 +2159,9 @@ select.input-full {
   --coc-accent: #3b82f6;
   display: flex;
   flex-direction: column;
-  min-height: 100vh;
+  height: 100vh;
+  min-height: 0;
+  overflow-y: auto;
   background: var(--coc-bg);
   color: var(--coc-text);
   font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
@@ -2345,13 +2347,15 @@ select.input-full {
   inset: 0;
   z-index: 2000;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: center;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 20px;
 }
 
 .coc-modal-backdrop {
-  position: absolute;
+  position: fixed;
   inset: 0;
   background: rgba(0, 0, 0, 0.72);
   cursor: pointer;
@@ -2361,8 +2365,7 @@ select.input-full {
   position: relative;
   width: 100%;
   max-width: 520px;
-  max-height: 90vh;
-  overflow-y: auto;
+  margin: auto 0;
   padding: 28px 28px 20px;
   border-radius: 12px;
   border: 1px solid var(--coc-border);
@@ -2521,14 +2524,6 @@ select.input-full {
 
 .coc-modal-cancel:hover {
   color: var(--coc-text);
-}
-
-.admin-premade-form {
-  margin-top: 14px;
-  padding: 14px;
-  border-radius: 8px;
-  border: 1px solid var(--coc-border);
-  background: rgba(15, 23, 42, 0.45);
 }
 
 .coc-lang-section-sub {

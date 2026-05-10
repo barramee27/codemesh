@@ -122,11 +122,11 @@
         </div>
         <label class="coc-field-label">Puzzle source</label>
         <select id="clash-source" class="coc-select-wide">
-          <option value="auto">Auto — admin premade first, then bank or AI</option>
+          <option value="auto">Auto — bank or AI (random mix)</option>
           <option value="bank">Bank only (instant)</option>
-          <option value="ai">New AI only</option>
+          <option value="ai">AI first (fallback to bank)</option>
         </select>
-        <label class="coc-field-label">Topic <span class="coc-optional">(AI only, optional)</span></label>
+        <label class="coc-field-label">Topic <span class="coc-optional">(AI source, optional)</span></label>
         <input type="text" id="clash-create-topic" class="coc-input-wide" placeholder="e.g. strings, graphs" maxlength="200" />
         <div class="coc-field-row">
           <div>
@@ -709,6 +709,9 @@
             <button class="vscode-action-btn" id="run-code-btn" title="Run Code (Ctrl+Enter)">
               <i class="codicon codicon-play"></i>
             </button>
+            <button class="vscode-action-btn" id="download-active-file-btn" title="Download active file (extension from language)">
+              <i class="codicon codicon-cloud-download"></i>
+            </button>
             <button class="vscode-action-btn" id="split-editor-btn" title="Split Editor Right">
               <i class="codicon codicon-split-horizontal"></i>
             </button>
@@ -806,8 +809,8 @@
         <span class="statusbar-item">Spaces: 4</span>
         <span class="statusbar-item">UTF-8</span>
         <span class="statusbar-item">CRLF</span>
-        <span class="statusbar-item" id="statusbar-lang-wrap" title="From active file name (e.g. app.cpp → C++)">
-          <span id="statusbar-lang">JavaScript</span>
+        <span class="statusbar-item" id="statusbar-lang-wrap" title="Language from file extension, or auto-detected from content for plain .txt / no extension">
+          <span id="statusbar-lang">Plain Text</span>
         </span>
         <span class="statusbar-item" title="Prettier">Prettier</span>
         <span class="statusbar-item" title="Feedback">
@@ -936,49 +939,6 @@
             </thead>
             <tbody id="admin-clashrooms-tbody"></tbody>
           </table>
-        </div>
-        <div class="admin-panel-header" style="margin-top:28px;">
-          <h3>Premade puzzle queue</h3>
-          <span class="admin-count" id="admin-premade-count">0</span>
-        </div>
-        <p class="clash-muted" style="margin:0 0 12px;">FIFO per mode: when a player creates a clash, one available premade for the rolled mode is used before bank/AI. Generate new premades with AI here.</p>
-        <div class="admin-table-wrap">
-          <table class="admin-table">
-            <thead>
-              <tr>
-                <th>Mode</th>
-                <th>Title</th>
-                <th>Status</th>
-                <th>Created</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody id="admin-premade-tbody"></tbody>
-          </table>
-        </div>
-        <div class="admin-premade-form">
-          <div class="coc-field-row">
-            <div>
-              <label class="coc-field-label" for="admin-premade-mode">Mode</label>
-              <select id="admin-premade-mode" class="coc-select-block">
-                <option value="fastest">Fastest</option>
-                <option value="reverse">Reverse</option>
-                <option value="shortest">Shortest</option>
-              </select>
-            </div>
-            <div>
-              <label class="coc-field-label" for="admin-premade-difficulty">Difficulty</label>
-              <select id="admin-premade-difficulty" class="coc-select-block">
-                <option value="easy">Easy</option>
-                <option value="mixed" selected>Mixed</option>
-                <option value="hard">Hard</option>
-              </select>
-            </div>
-          </div>
-          <label class="coc-field-label" for="admin-premade-topic">Topic</label>
-          <input id="admin-premade-topic" class="coc-input-wide" type="text" maxlength="200" placeholder="e.g. strings, arrays, math, parsing" />
-          <p id="admin-premade-msg" class="coc-modal-msg"></p>
-          <button type="button" class="btn btn-primary btn-sm" id="admin-premade-generate-btn">Generate AI premade</button>
         </div>
         <div id="admin-clashroom-submissions-panel" class="admin-session-code-panel" style="display:none;">
           <div class="admin-panel-header" style="margin:0;">

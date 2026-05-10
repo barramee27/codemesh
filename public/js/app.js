@@ -786,7 +786,7 @@
             less: 'less',
             plaintext: 'plaintext'
         };
-        return langMap[lang] || 'javascript';
+        return langMap[lang] || 'plaintext';
     }
 
     /** VS Code–style: language from file name / extension */
@@ -813,9 +813,142 @@
             '.json': 'json', '.yaml': 'yaml', '.yml': 'yaml',
             '.xml': 'xml',
             '.sh': 'shell', '.bash': 'shell', '.zsh': 'shell',
+            '.txt': 'plaintext',
             '.gitkeep': 'plaintext'
         };
         return byExt[ext] || 'plaintext';
+    }
+
+    /** Best-effort language from first lines of content (when name has no real extension). */
+    function inferLanguageFromContent(text) {
+        const s = String(text || '').slice(0, 24000);
+        const head = s.slice(0, 8000).trimStart().toLowerCase();
+        if (!head) return 'plaintext';
+        if (/<!doctype\s+html\b/.test(head) || /<html[\s>]/.test(head) || /<head[\s>]/.test(head) || /<body[\s>]/.test(head)) {
+            return 'html';
+        }
+        if (head.startsWith('#!/usr/bin/env bash') || head.startsWith('#!/bin/bash') || head.startsWith('#!/bin/sh')) {
+            return 'shell';
+        }
+        if (/\bfn\s+main\s*\(/.test(head) && (head.includes('use std::') || head.includes('println!'))) {
+            return 'rust';
+        }
+        if (/^\s*package\s+main\b/m.test(s) && /\bfunc\s+main\s*\(/.test(s)) {
+            return 'go';
+        }
+        if (head.includes('<?php')) {
+            return 'php';
+        }
+        if (/#include\s*<iostream/.test(head) || /using\s+namespace\s+std\b/.test(head) || /\bstd::\w+/.test(head)) {
+            return 'cpp';
+        }
+        if (/#include\s*<stdio\.h>/.test(head) || (/\bint\s+main\s*\(\s*\)/.test(head) && head.includes('#include'))) {
+            return 'c';
+        }
+        if (/\bpublic\s+static\s+void\s+main\s*\(/.test(head) || /\bpublic\s+class\s+\w+/.test(head)) {
+            return 'java';
+        }
+        if (/^\s*import\s+[\w.]+\s*$/m.test(s) && /^\s*(from\s+[\w.]+\s+import|def\s+\w+\s*\()/m.test(s)) {
+            return 'python';
+        }
+        if (/^\s*def\s+\w+\s*\(/m.test(s) || /^\s*class\s+\w+\s*(\(|:)/m.test(s)) {
+            return 'python';
+        }
+        if (/^\s*(import|export)\s+.+from\s+['"]/m.test(s) || /\btype\s+\w+\s*=/m.test(head)) {
+            return 'typescript';
+        }
+        if (/^\s*import\s+/.test(head) && /['"]use strict['"]/.test(head)) {
+            return 'javascript';
+        }
+        if (/^\s*function\s+\w+\s*\(/.test(head) || /^\s*(const|let|var)\s+\w+\s*=/.test(head)) {
+            return 'javascript';
+        }
+        return 'plaintext';
+    }
+
+    const EXT_FOR_LANG = {
+        javascript: '.js',
+        typescript: '.ts',
+        python: '.py',
+        html: '.html',
+        css: '.css',
+        java: '.java',
+        cpp: '.cpp',
+        c: '.c',
+        csharp: '.cs',
+        go: '.go',
+        rust: '.rs',
+        php: '.php',
+        ruby: '.rb',
+        sql: '.sql',
+        markdown: '.md',
+        json: '.json',
+        yaml: '.yaml',
+        xml: '.xml',
+        shell: '.sh',
+        scss: '.scss',
+        less: '.less',
+        plaintext: '.txt'
+    };
+
+    function extensionForLanguage(lang) {
+        return EXT_FOR_LANG[lang] || '.txt';
+    }
+
+    function resolveEditorLanguage(file, text) {
+        const doc = text != null
+            ? text
+            : (file && (file.doc != null ? file.doc : file.content)) || '';
+        const fromName = inferLanguageFromFileName((file && file.name) || '');
+        if (fromName !== 'plaintext') return fromName;
+        return inferLanguageFromContent(doc);
+    }
+
+    function downloadActiveFile() {
+        const file = state.activeFileId ? state.files.get(state.activeFileId) : null;
+        if (!file || !state.editorView) return;
+        const text = state.editorView.getValue();
+        const lang = resolveEditorLanguage(file, text);
+        const baseFromPath = (file.name || 'snippet').split('/').pop() || 'snippet';
+        const hasKnownExt = /\.[a-zA-Z0-9]{1,12}$/.test(baseFromPath);
+        let filename = baseFromPath;
+        if (!hasKnownExt) {
+            filename = `snippet${extensionForLanguage(lang)}`;
+        }
+        const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = filename;
+        a.rel = 'noopener';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+        showToast(`Downloaded ${filename}`, 'success');
+    }
+
+    let languageInferTimer = null;
+    function scheduleLanguageReinferFromContent() {
+        const file = state.activeFileId ? state.files.get(state.activeFileId) : null;
+        if (!file || !state.editorView || !state.socket || !state.currentSession) return;
+        if (inferLanguageFromFileName(file.name) !== 'plaintext') return;
+        clearTimeout(languageInferTimer);
+        languageInferTimer = setTimeout(() => {
+            const txt = state.editorView.getValue();
+            const next = inferLanguageFromContent(txt);
+            if (next !== file.language) {
+                file.language = next;
+                monaco.editor.setModelLanguage(state.editorView.getModel(), mapLanguageToMonaco(next));
+                updateStatusbarLanguage(next);
+                renderFileTree();
+                renderTabs();
+                state.socket.emit('language-change', {
+                    sessionId: state.currentSession,
+                    fileId: state.activeFileId,
+                    language: next
+                });
+            }
+        }, 450);
     }
 
     function languageDisplayName(lang) {
@@ -929,6 +1062,7 @@
                 if (file && state.editorView) {
                     file.doc = state.editorView.getValue();
                 }
+                scheduleLanguageReinferFromContent();
                 localBatchTimer = null;
             }, LOCAL_BATCH_MS);
         }
@@ -1097,8 +1231,12 @@
             setDocumentTitle(`${sessionData.title || sessionId} · CodeMesh`);
 
             const firstLang = (sessionData.files && sessionData.files.length > 0)
-                ? (sessionData.files[0].language || inferLanguageFromFileName(sessionData.files[0].name))
-                : (sessionData.language || 'javascript');
+                ? resolveEditorLanguage({
+                    name: sessionData.files[0].name,
+                    language: sessionData.files[0].language,
+                    doc: sessionData.files[0].content || ''
+                })
+                : (sessionData.language || 'plaintext');
             updateStatusbarLanguage(firstLang);
 
             // Clear and create editor
@@ -1160,11 +1298,17 @@
             let firstFileId = null;
             if (data.files && Object.keys(data.files).length > 0) {
                 for (const [id, fileData] of Object.entries(data.files)) {
+                    const doc = fileData.doc || '';
+                    const lang = resolveEditorLanguage({
+                        name: fileData.name,
+                        language: fileData.language,
+                        doc
+                    });
                     state.files.set(id, {
                         id: fileData.id,
                         name: fileData.name,
-                        doc: fileData.doc || '',
-                        language: fileData.language || 'javascript',
+                        doc,
+                        language: lang,
                         version: fileData.version || 0
                     });
                     if (!firstFileId) firstFileId = id;
@@ -1174,9 +1318,9 @@
                 firstFileId = 'main_file';
                 state.files.set(firstFileId, {
                     id: firstFileId,
-                    name: 'main.js',
+                    name: 'snippet.txt',
                     doc: '',
-                    language: 'javascript',
+                    language: 'plaintext',
                     version: 0
                 });
             }
@@ -1320,7 +1464,7 @@
                 file.language = language;
                 if (fileId === state.activeFileId) {
                     updateStatusbarLanguage(language);
-                    reconfigureLanguage(language);
+                    applyLanguageToActiveEditor(language);
                 } else {
                     renderFileTree();
                     renderTabs();
@@ -1411,30 +1555,33 @@
         }
     }
 
-    // ─── Reconfigure Language ───
+    // ─── Apply language to Monaco + UI (no socket emit; use for remote language-changed) ───
+    function applyLanguageToActiveEditor(lang) {
+        if (!state.editorView || !monacoLoaded) return;
+        monaco.editor.setModelLanguage(state.editorView.getModel(), mapLanguageToMonaco(lang));
+        updateRemoteSelections();
+        renderFileTree();
+        renderTabs();
+        updateStatusbarLanguage(lang);
+    }
+
+    // ─── User-initiated language change (emits to server) ───
     function reconfigureLanguage(lang) {
         if (!state.editorView || !monacoLoaded) return;
 
-        monaco.editor.setModelLanguage(state.editorView.getModel(), mapLanguageToMonaco(lang));
-        
-        // Let server know we changed the active file's language
         if (state.socket && state.currentSession && state.activeFileId) {
             state.socket.emit('language-change', {
                 sessionId: state.currentSession,
                 fileId: state.activeFileId,
                 language: lang
             });
-            // Update local memory
             const file = state.files.get(state.activeFileId);
             if (file) {
                 file.language = lang;
             }
         }
-        
-        updateRemoteSelections(); // Restore selections
-        renderFileTree(); // Update file extension
-        renderTabs();
-        updateStatusbarLanguage(lang);
+
+        applyLanguageToActiveEditor(lang);
     }
 
     // ─── File Tree (nested folders from path names, e.g. routes/auth.js) ───
@@ -1446,6 +1593,7 @@
         else if (lang === 'css') { iconClass = 'codicon-symbol-color'; iconColor = '#563d7c'; }
         else if (lang === 'python') { iconClass = 'codicon-symbol-misc'; iconColor = '#3572A5'; }
         else if (lang === 'java') { iconClass = 'codicon-symbol-class'; iconColor = '#b07219'; }
+        else if (lang === 'cpp' || lang === 'c') { iconClass = 'codicon-symbol-misc'; iconColor = '#6594b3'; }
         else if (lang === 'javascript' || lang === 'typescript') { iconClass = 'codicon-symbol-class'; iconColor = '#f1e05a'; }
         else if (lang === 'plaintext') { iconClass = 'codicon-file'; iconColor = '#6e7681'; }
         return { iconClass, iconColor };
@@ -1497,7 +1645,7 @@
             const pad = 6 + depth * 14;
             if (child.kind === 'file') {
                 const { id, file } = child;
-                const lang = file.language || inferLanguageFromFileName(file.name);
+                const lang = resolveEditorLanguage(file, file.doc);
                 const { iconClass, iconColor } = fileIconForLang(lang, false);
                 const isActive = id === state.activeFileId ? 'active' : '';
                 html += `
@@ -1602,14 +1750,16 @@
                 return;
             }
             
-            const lang = file.language || inferLanguageFromFileName(file.name);
+            const lang = resolveEditorLanguage(file, file.doc);
             let iconClass = 'codicon-file';
             let iconColor = '#519aba';
             if (lang === 'html') { iconClass = 'codicon-code'; iconColor = '#e34c26'; }
             else if (lang === 'css') { iconClass = 'codicon-symbol-color'; iconColor = '#563d7c'; }
             else if (lang === 'python') { iconClass = 'codicon-symbol-misc'; iconColor = '#3572A5'; }
             else if (lang === 'java') { iconClass = 'codicon-symbol-class'; iconColor = '#b07219'; }
+            else if (lang === 'cpp' || lang === 'c') { iconClass = 'codicon-symbol-misc'; iconColor = '#555555'; }
             else if (lang === 'javascript' || lang === 'typescript') { iconClass = 'codicon-symbol-class'; iconColor = '#f1e05a'; }
+            else if (lang === 'plaintext') { iconClass = 'codicon-file'; iconColor = '#6e7681'; }
 
             const isActive = id === state.activeFileId ? 'active' : '';
             const tabLabel = fileBasename(file.name);
@@ -1644,7 +1794,7 @@
         container.innerHTML = '';
         if (container2) { container2.innerHTML = ''; container2.style.display = state.splitActive ? '' : 'none'; }
         if (splitContainer) splitContainer.classList.toggle('split-active', state.splitActive);
-        state.editorView = createEditor(container, file.doc, file.language || inferLanguageFromFileName(file.name));
+        state.editorView = createEditor(container, file.doc, resolveEditorLanguage(file, file.doc));
         if (state.splitActive && container2) {
             const model = state.editorView.getModel();
             if (model) state.splitEditor = monaco.editor.create(container2, { model, readOnly: state.userRole === 'viewer' });
@@ -1655,7 +1805,7 @@
             setEditorReadOnly(true);
         }
 
-        if (!file.language) file.language = inferLanguageFromFileName(file.name);
+        file.language = resolveEditorLanguage(file, file.doc);
         updateStatusbarLanguage(file.language);
 
         renderFileTree();
@@ -2226,6 +2376,11 @@
             }
         });
 
+        // ─── Download active file ───
+        document.getElementById('download-active-file-btn')?.addEventListener('click', () => {
+            downloadActiveFile();
+        });
+
         // ─── Split Editor ───
         document.getElementById('split-editor-btn')?.addEventListener('click', () => {
             if (!state.editorView) return;
@@ -2298,8 +2453,8 @@
         const code = state.editorView.getValue();
         const active = state.activeFileId && state.files.get(state.activeFileId);
         const language = active
-            ? (active.language || inferLanguageFromFileName(active.name))
-            : 'javascript';
+            ? resolveEditorLanguage(active, code)
+            : 'plaintext';
 
         if (!code.trim()) {
             showToast('Nothing to run — editor is empty', 'error');
@@ -2431,7 +2586,6 @@
                     clashroomsPanel.style.display = target === 'clashrooms' ? '' : 'none';
                     if (target === 'clashrooms') {
                         loadAdminClashrooms();
-                        loadAdminClashPremades();
                     }
                 }
                 if (filesPanel) {
@@ -2477,43 +2631,6 @@
                 }
                 return;
             }
-            const premDel = e.target.closest('.admin-delete-premade');
-            if (premDel && premDel.dataset.id) {
-                if (!confirm('Remove this premade from the queue?')) return;
-                try {
-                    await api('/admin/clash-premades/' + encodeURIComponent(premDel.dataset.id), { method: 'DELETE' });
-                    showToast('Premade deleted', 'success');
-                    loadAdminClashPremades();
-                } catch (err) {
-                    showToast(err.message, 'error');
-                }
-            }
-        });
-
-        document.getElementById('admin-premade-generate-btn')?.addEventListener('click', async () => {
-            const btn = document.getElementById('admin-premade-generate-btn');
-            const msg = document.getElementById('admin-premade-msg');
-            const body = {
-                resolvedMode: document.getElementById('admin-premade-mode')?.value || 'fastest',
-                difficulty: document.getElementById('admin-premade-difficulty')?.value || 'mixed',
-                topic: document.getElementById('admin-premade-topic')?.value || ''
-            };
-            if (btn) btn.disabled = true;
-            if (msg) msg.textContent = 'Generating premade with AI…';
-            try {
-                const res = await api('/admin/clash-premades/generate', {
-                    method: 'POST',
-                    body: JSON.stringify(body)
-                });
-                showToast(res.message || 'AI premade added to queue', 'success');
-                if (msg) msg.textContent = res.premade && res.premade.title ? `Added: ${res.premade.title}` : 'Added to queue.';
-                loadAdminClashPremades();
-            } catch (err) {
-                if (msg) msg.textContent = err.message || 'Failed to generate premade';
-                showToast(err.message || 'Failed to generate premade', 'error');
-            } finally {
-                if (btn) btn.disabled = false;
-            }
         });
 
         document.getElementById('admin-upload-btn')?.addEventListener('click', () => document.getElementById('admin-file-input')?.click());
@@ -2527,7 +2644,7 @@
 
     async function loadAdminPanel() {
         showView('admin');
-        await Promise.all([loadAdminUsers(), loadAdminSessions(), loadAdminClashrooms(), loadAdminClashPremades(), loadAdminFiles()]);
+        await Promise.all([loadAdminUsers(), loadAdminSessions(), loadAdminClashrooms(), loadAdminFiles()]);
     }
 
     async function loadAdminClashrooms() {
@@ -2556,29 +2673,6 @@
         } catch (err) {
             if (countEl) countEl.textContent = '—';
             tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--text-muted);padding:24px;">Failed to load</td></tr>';
-        }
-    }
-
-    async function loadAdminClashPremades() {
-        const tbody = document.getElementById('admin-premade-tbody');
-        const countEl = document.getElementById('admin-premade-count');
-        if (!tbody) return;
-        try {
-            const rows = await api('/admin/clash-premades');
-            if (countEl) countEl.textContent = `${rows.length} items`;
-            tbody.innerHTML = rows.length === 0
-                ? '<tr><td colspan="5" style="text-align:center;color:var(--text-muted);padding:16px;">No premades — new clashes use bank/AI only until you add some.</td></tr>'
-                : rows.map((r) => `
-                    <tr>
-                        <td>${escapeHtml(r.resolvedMode || '—')}</td>
-                        <td>${escapeHtml(r.title || '—')}</td>
-                        <td>${escapeHtml(r.status || '—')}</td>
-                        <td>${timeAgo(r.createdAt)}</td>
-                        <td><button type="button" class="btn-delete admin-delete-premade" data-id="${escapeHtml(String(r._id))}">Delete</button></td>
-                    </tr>`).join('');
-        } catch (err) {
-            if (countEl) countEl.textContent = '—';
-            tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--text-muted);padding:16px;">Failed to load premades</td></tr>';
         }
     }
 
@@ -3482,8 +3576,7 @@
                 source,
                 topic,
                 lobbyCountdownMinutes,
-                roomDurationMinutes,
-                tryPremadeFirst: source !== 'ai'
+                roomDurationMinutes
             };
             if (!languagesAll) body.allowedLanguages = allowedLanguages;
             const r = await api('/clashrooms', {

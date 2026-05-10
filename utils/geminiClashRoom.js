@@ -26,6 +26,13 @@ function stripJsonFence(text) {
     return t.trim();
 }
 
+function summarizeJsonParseError(err, text) {
+    const trimmed = String(text || '').trim();
+    if (!trimmed) return 'model returned empty JSON text';
+    if (/Unexpected end/i.test(err.message)) return 'model returned incomplete JSON';
+    return err.message;
+}
+
 async function callGeminiGenerateJson(modelId, bodyPayload) {
     const key = process.env.GEMINI_API_KEY;
     if (!key) {
@@ -70,9 +77,45 @@ async function callGeminiGenerateJson(modelId, bodyPayload) {
     try {
         return JSON.parse(stripped);
     } catch (err) {
-        throw new Error(`Gemini returned invalid problem JSON: ${err.message}`);
+        throw new Error(`Gemini returned invalid problem JSON: ${summarizeJsonParseError(err, stripped)}`);
     }
 }
+
+const CLASH_ROOM_RESPONSE_SCHEMA = {
+    type: 'object',
+    required: ['title', 'statement', 'samples', 'tests', 'allowedLanguages'],
+    properties: {
+        title: { type: 'string' },
+        statement: { type: 'string' },
+        samples: {
+            type: 'array',
+            items: {
+                type: 'object',
+                required: ['input', 'output'],
+                properties: {
+                    input: { type: 'string' },
+                    output: { type: 'string' }
+                }
+            }
+        },
+        tests: {
+            type: 'array',
+            items: {
+                type: 'object',
+                required: ['input', 'output', 'hidden'],
+                properties: {
+                    input: { type: 'string' },
+                    output: { type: 'string' },
+                    hidden: { type: 'boolean' }
+                }
+            }
+        },
+        allowedLanguages: {
+            type: 'array',
+            items: { type: 'string' }
+        }
+    }
+};
 
 function validateAndNormalizeClashRoom(obj, mode) {
     if (!obj || typeof obj !== 'object') throw new Error('Invalid AI response: not an object');
@@ -142,14 +185,31 @@ Difficulty: ${difficulty || 'mixed'}.
 
 Return JSON only.`;
 
-    const parsed = await callGeminiGenerateJson(model, {
-        contents: [{ role: 'user', parts: [{ text: prompt }] }],
-        generationConfig: {
-            temperature: 0.35,
-            maxOutputTokens: 8192,
-            responseMimeType: 'application/json'
-        }
-    });
+    let parsed;
+    try {
+        parsed = await callGeminiGenerateJson(model, {
+            contents: [{ role: 'user', parts: [{ text: prompt }] }],
+            generationConfig: {
+                temperature: 0.25,
+                maxOutputTokens: 16384,
+                responseMimeType: 'application/json',
+                responseSchema: CLASH_ROOM_RESPONSE_SCHEMA
+            }
+        });
+    } catch (err) {
+        const compactPrompt = `${prompt}
+
+Retry requirement: return a compact JSON object only. Keep statement under 1800 characters and include 4-8 tests.`;
+        parsed = await callGeminiGenerateJson(model, {
+            contents: [{ role: 'user', parts: [{ text: compactPrompt }] }],
+            generationConfig: {
+                temperature: 0.15,
+                maxOutputTokens: 16384,
+                responseMimeType: 'application/json',
+                responseSchema: CLASH_ROOM_RESPONSE_SCHEMA
+            }
+        });
+    }
 
     return validateAndNormalizeClashRoom(parsed, mode);
 }

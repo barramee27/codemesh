@@ -25,7 +25,7 @@ function getOrCreateSessionState(sessionId) {
         activeSessions.set(sessionId, {
             files: new Map(), // fileId -> { doc, version, history }
             users: new Map(), // socketId -> { username, color, cursor, selection, userId, role, activeFileId }
-            language: 'javascript', // Default fallback
+            language: 'plaintext', // Default fallback (client resolves from name/content)
             comments: [], // { id, fileId, line, text, author, timestamp }
             chatMessages: [] // { id, userId, username, text, ts }
         });
@@ -188,9 +188,9 @@ module.exports = function setupCollaboration(io) {
                             const defaultFileId = 'main_file';
                             state.files.set(defaultFileId, {
                                 id: defaultFileId,
-                                name: 'main.js',
+                                name: 'snippet.txt',
                                 doc: dbSession.code || '',
-                                language: dbSession.language || 'javascript',
+                                language: dbSession.language || 'plaintext',
                                 version: 0,
                                 history: []
                             });
@@ -200,7 +200,7 @@ module.exports = function setupCollaboration(io) {
                                     id: f.id,
                                     name: f.name,
                                     doc: f.content || '',
-                                    language: f.language || 'javascript',
+                                    language: f.language || 'plaintext',
                                     version: 0,
                                     history: []
                                 });
@@ -352,7 +352,7 @@ module.exports = function setupCollaboration(io) {
                 id: fileId,
                 name: name,
                 doc: '',
-                language: language || 'javascript',
+                language: language || 'plaintext',
                 version: 0,
                 history: []
             });
@@ -361,7 +361,7 @@ module.exports = function setupCollaboration(io) {
                 id: fileId,
                 name: name,
                 doc: '',
-                language: language || 'javascript'
+                language: language || 'plaintext'
             });
             scheduleSave(sessionId);
         });

@@ -45,7 +45,7 @@ const sessionSchema = new mongoose.Schema({
     // Keep old fields for backward compatibility, but use files array mostly
     language: {
         type: String,
-        default: 'javascript'
+        default: 'plaintext'
     },
     code: {
         type: String,

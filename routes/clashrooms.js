@@ -4,7 +4,6 @@ const crypto = require('crypto');
 const authMiddleware = require('../middleware/auth');
 const optionalAuth = require('../middleware/optionalAuth');
 const ClashRoom = require('../models/ClashRoom');
-const ClashPremade = require('../models/ClashPremade');
 const ClashRoomSubmission = require('../models/ClashRoomSubmission');
 const {
     generateClashRoomProblem,
@@ -199,23 +198,6 @@ async function runProVerification(roomId) {
     }
 }
 
-/** Atomically take next admin premade for this mode (FIFO), or null if queue empty. */
-async function claimPremade(resolvedMode) {
-    for (let i = 0; i < 4; i++) {
-        const cand = await ClashPremade.findOne({ status: 'available', resolvedMode })
-            .sort({ createdAt: 1 })
-            .select('_id');
-        if (!cand) return null;
-        const updated = await ClashPremade.findOneAndUpdate(
-            { _id: cand._id, status: 'available' },
-            { $set: { status: 'consumed', consumedAt: new Date() } },
-            { new: true }
-        ).lean();
-        if (updated) return updated;
-    }
-    return null;
-}
-
 function redactedListRow(room, hostUsername) {
     const row = {
         slug: room.slug,
@@ -271,75 +253,6 @@ router.post('/', authMiddleware, registeredUserOnly, createLimiter, async (req, 
         const cdMin = Number(req.body.lobbyCountdownMinutes);
         const countdownDurationMs = (cdMin >= 1 && cdMin <= 15 ? cdMin : 5) * 60 * 1000;
 
-        const tryPremadeFirst = req.body.tryPremadeFirst !== false && req.body.tryPremadeFirst !== 'false'
-            && sourceRaw !== 'ai';
-
-        if (tryPremadeFirst) {
-            const premadeDoc = await claimPremade(resolvedMode);
-            if (premadeDoc) {
-                const tests = (premadeDoc.tests || []).map((t) => ({
-                    input: String(t.input != null ? t.input : ''),
-                    output: String(t.output != null ? t.output : ''),
-                    hidden: !!t.hidden
-                }));
-                if (!tests.length) {
-                    await ClashPremade.updateOne(
-                        { _id: premadeDoc._id },
-                        { $set: { status: 'available', consumedAt: null } }
-                    ).catch(() => {});
-                    return res.status(400).json({ error: 'Queued premade had no tests — re-added to queue. Fix it in admin.' });
-                }
-                const payload = {
-                    title: premadeDoc.title,
-                    statement: premadeDoc.statement || '',
-                    samples: premadeDoc.samples || [],
-                    tests,
-                    allowedLanguages: (premadeDoc.allowedLanguages && premadeDoc.allowedLanguages.length)
-                        ? premadeDoc.allowedLanguages
-                        : ALL_RUNNER_LANGS
-                };
-                let room;
-                try {
-                    room = await ClashRoom.create({
-                        slug,
-                        resolvedMode,
-                        phase: 'lobby',
-                        status: 'ready',
-                        allowedModesPick: modesPick,
-                        languagesAll,
-                        participantIds: [req.user.id],
-                        maxPlayers,
-                        countdownDurationMs,
-                        sourceKind: 'premade',
-                        title: payload.title,
-                        statement: payload.statement,
-                        samples: payload.samples,
-                        tests: payload.tests,
-                        allowedLanguages: languagesAll
-                            ? ALL_RUNNER_LANGS
-                            : langs.filter((l) => (payload.allowedLanguages || ALL_RUNNER_LANGS).includes(l)),
-                        timeLimitMs: Math.min(Number(req.body.timeLimitMs) || 8000, 15000),
-                        roomDurationMs,
-                        createdBy: req.user.id
-                    });
-                } catch (saveErr) {
-                    await ClashPremade.updateOne(
-                        { _id: premadeDoc._id },
-                        { $set: { status: 'available', consumedAt: null } }
-                    ).catch(() => {});
-                    throw saveErr;
-                }
-                return res.status(201).json({
-                    slug: room.slug,
-                    phase: room.phase,
-                    status: room.status,
-                    sourceKind: room.sourceKind,
-                    message: 'Private room created from admin premade queue. Invite players — nothing is revealed until the countdown finishes.',
-                    joinPath: `/clash/${room.slug}`
-                });
-            }
-        }
-
         if (useBank) {
             const payload = pickRandomTemplate(resolvedMode);
             const room = await ClashRoom.create({
@@ -385,9 +298,7 @@ router.post('/', authMiddleware, registeredUserOnly, createLimiter, async (req, 
                 modelId: flashModel
             });
         } catch (genErr) {
-            if (sourceRaw === 'ai') {
-                throw new Error(`AI generation failed: ${genErr.message || 'invalid JSON from model'}`);
-            }
+            console.warn('clashrooms AI generation failed; falling back to bank:', genErr.message);
             payload = pickRandomTemplate(resolvedMode);
             useBank = true;
             effectiveSourceKind = 'bank';
