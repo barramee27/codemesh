@@ -895,6 +895,71 @@
         return EXT_FOR_LANG[lang] || '.txt';
     }
 
+    /** Only auto-rename the default scratch file, not arbitrary user .txt names. */
+    function shouldAutoRenameSnippetTxtName(fullPath) {
+        const base = (fullPath || '').split(/[/\\]/).pop() || '';
+        const lower = base.toLowerCase();
+        return lower === 'snippet.txt' || lower === 'snippet.text';
+    }
+
+    function workspacePathsExcluding(excludeFileId) {
+        const taken = new Set();
+        state.files.forEach((f, id) => {
+            if (id === excludeFileId) return;
+            taken.add(String(f.name || '').replace(/\\/g, '/'));
+        });
+        return taken;
+    }
+
+    /** Build `dir + stem + ext` or stem2, stem3… if taken (same folder). */
+    function uniqueNameInWorkspace(dir, stem, ext, excludeFileId) {
+        const prefix = dir ? String(dir).replace(/\\/g, '/') : '';
+        const taken = workspacePathsExcluding(excludeFileId);
+        const tryFull = (base) => {
+            const full = prefix + base;
+            return taken.has(full) ? null : full;
+        };
+        let candidate = tryFull(stem + ext);
+        if (candidate) return candidate;
+        for (let i = 2; i < 100; i++) {
+            candidate = tryFull(stem + i + ext);
+            if (candidate) return candidate;
+        }
+        return prefix + stem + '_' + Date.now() + ext;
+    }
+
+    /**
+     * When the default scratch file is still .txt but content clearly matches another language,
+     * rename on disk/session (e.g. snippet.txt → snippet.cpp).
+     */
+    function tryAutoRenameForInferredLang(file, textOverride) {
+        if (!file || !state.socket || !state.currentSession || !state.activeFileId) return;
+        if (file.id !== state.activeFileId) return;
+        if (state.userRole === 'viewer') return;
+        if (inferLanguageFromFileName(file.name) !== 'plaintext') return;
+        if (!shouldAutoRenameSnippetTxtName(file.name)) return;
+        const txt = textOverride != null ? textOverride : (state.editorView ? state.editorView.getValue() : file.doc) || '';
+        const next = inferLanguageFromContent(txt);
+        if (next === 'plaintext') return;
+        const wantExt = extensionForLanguage(next);
+        const norm = String(file.name || '').replace(/\\/g, '/');
+        const parts = norm.split('/').filter(Boolean);
+        if (!parts.length) return;
+        const base = parts[parts.length - 1];
+        if (base.toLowerCase().endsWith(wantExt.toLowerCase())) return;
+        const dir = parts.length > 1 ? parts.slice(0, -1).join('/') + '/' : '';
+        let stem = base.replace(/\.(txt|text)$/i, '');
+        if (!stem) stem = 'snippet';
+        const newFull = uniqueNameInWorkspace(dir, stem, wantExt, state.activeFileId);
+        if (newFull !== file.name) {
+            state.socket.emit('rename-file', {
+                sessionId: state.currentSession,
+                fileId: state.activeFileId,
+                newName: newFull
+            });
+        }
+    }
+
     function resolveEditorLanguage(file, text) {
         const doc = text != null
             ? text
@@ -934,10 +999,12 @@
         if (inferLanguageFromFileName(file.name) !== 'plaintext') return;
         clearTimeout(languageInferTimer);
         languageInferTimer = setTimeout(() => {
+            const f = state.activeFileId ? state.files.get(state.activeFileId) : null;
+            if (!f || !state.editorView || !state.socket || !state.currentSession) return;
             const txt = state.editorView.getValue();
             const next = inferLanguageFromContent(txt);
-            if (next !== file.language) {
-                file.language = next;
+            if (next !== f.language) {
+                f.language = next;
                 monaco.editor.setModelLanguage(state.editorView.getModel(), mapLanguageToMonaco(next));
                 updateStatusbarLanguage(next);
                 renderFileTree();
@@ -948,6 +1015,7 @@
                     language: next
                 });
             }
+            tryAutoRenameForInferredLang(f, txt);
         }, 450);
     }
 
@@ -1807,6 +1875,10 @@
 
         file.language = resolveEditorLanguage(file, file.doc);
         updateStatusbarLanguage(file.language);
+
+        if (state.socket && state.currentSession) {
+            tryAutoRenameForInferredLang(file, file.doc);
+        }
 
         renderFileTree();
         renderTabs();
