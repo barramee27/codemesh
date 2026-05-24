@@ -466,10 +466,11 @@
           <p class="dashboard-subtitle">Create, join, or manage collaborative coding sessions</p>
         </div>
         <div class="dashboard-actions">
-          <div class="join-input-group">
-            <input type="text" id="join-session-id" placeholder="Enter session ID to join..."
-              class="input-sm">
-            <button class="btn btn-secondary btn-sm" id="join-session-btn">
+          <div class="join-input-group join-input-group-stacked">
+            <div class="join-input-row">
+              <input type="text" id="join-session-id" placeholder="Enter session ID to join..."
+                class="input-sm">
+              <button class="btn btn-secondary btn-sm" id="join-session-btn">
               <svg viewBox="0 0 20 20" fill="currentColor" width="16" height="16">
                 <path fill-rule="evenodd"
                   d="M12.586 4.586a2 2 0 112.828 2.828l-3 3a2 2 0 01-2.828 0 1 1 0 00-1.414 1.414 4 4 0 005.656 0l3-3a4 4 0 00-5.656-5.656l-1.5 1.5a1 1 0 101.414 1.414l1.5-1.5zm-5 5a2 2 0 012.828 0 1 1 0 101.414-1.414 4 4 0 00-5.656 0l-3 3a4 4 0 105.656 5.656l1.5-1.5a1 1 0 10-1.414-1.414l-1.5 1.5a2 2 0 11-2.828-2.828l3-3z"
@@ -477,6 +478,9 @@
               </svg>
               Join
             </button>
+            </div>
+            <input type="password" id="join-class-key-input" class="input-sm join-class-key-input"
+              placeholder="Class key (required for private sessions)" maxlength="64" autocomplete="off" />
           </div>
           <a href="/clash" class="btn btn-secondary" id="dashboard-clash-btn">Clash</a>
           <button class="btn btn-primary" id="create-session-btn">
@@ -487,25 +491,6 @@
             </svg>
             <span>New Session</span>
           </button>
-        </div>
-      </div>
-
-      <!-- Create Session Modal -->
-      <div id="class-key-modal" class="modal" style="display:none;" aria-hidden="true">
-        <div class="modal-backdrop" id="class-key-modal-backdrop"></div>
-        <div class="modal-content">
-          <h3 class="modal-title">Private session</h3>
-          <p class="form-hint" style="margin:0 0 12px;color:var(--text-muted);">
-            This session requires a class key. Enter the key from your teacher to join.
-          </p>
-          <div class="form-group">
-            <label for="class-key-modal-input">Class key</label>
-            <input type="password" id="class-key-modal-input" class="input-full" placeholder="Enter class key" maxlength="64" autocomplete="off" />
-          </div>
-          <div class="modal-actions">
-            <button type="button" class="btn btn-ghost" id="class-key-modal-cancel">Cancel</button>
-            <button type="button" class="btn btn-primary" id="class-key-modal-submit">Join session</button>
-          </div>
         </div>
       </div>
 
@@ -1037,6 +1022,51 @@
         </div>
       </div>
     </main>
+  </div>
+
+  <!-- Global modals (outside .view so they stay visible when switching views) -->
+  <div id="class-key-modal" class="modal" style="display:none;" aria-hidden="true">
+    <div class="modal-backdrop" id="class-key-modal-backdrop"></div>
+    <div class="modal-content">
+      <h3 class="modal-title">Private session</h3>
+      <p class="form-hint class-key-modal-hint">
+        This session is private. Enter the class key from your teacher to join.
+      </p>
+      <div class="form-group">
+        <label for="class-key-modal-input">Class key</label>
+        <input type="password" id="class-key-modal-input" class="input-full" placeholder="Enter class key" maxlength="64" autocomplete="off" />
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-ghost" id="class-key-modal-cancel">Cancel</button>
+        <button type="button" class="btn btn-primary" id="class-key-modal-submit">Join session</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="session-access-modal" class="modal" style="display:none;" aria-hidden="true">
+    <div class="modal-backdrop" id="session-access-modal-backdrop"></div>
+    <div class="modal-content">
+      <h3 class="modal-title">Session access</h3>
+      <p class="form-hint class-key-modal-hint">
+        Public: anyone with the link can join. Private: students need the class key (only you and site admins can change this).
+      </p>
+      <div class="form-group">
+        <label for="session-access-modal-select">Visibility</label>
+        <select id="session-access-modal-select" class="input-full">
+          <option value="public">Public — open to anyone with the link</option>
+          <option value="private">Private — class key required</option>
+        </select>
+      </div>
+      <div class="form-group" id="session-access-modal-key-group">
+        <label for="session-access-modal-key">Class key</label>
+        <input type="password" id="session-access-modal-key" class="input-full" placeholder="4–64 characters" maxlength="64" autocomplete="new-password" />
+        <p class="form-hint" id="session-access-modal-key-hint" style="margin:8px 0 0;font-size:0.85rem;color:var(--text-muted);"></p>
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-ghost" id="session-access-modal-cancel">Cancel</button>
+        <button type="button" class="btn btn-primary" id="session-access-modal-save">Save</button>
+      </div>
+    </div>
   </div>
 
   <!-- Toast notifications -->

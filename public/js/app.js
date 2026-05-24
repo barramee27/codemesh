@@ -612,6 +612,11 @@
         return !!(state.sessionOwnerId && uid && state.sessionOwnerId.toString() === uid.toString());
     }
 
+    function getDashboardClassKey() {
+        const el = document.getElementById('join-class-key-input');
+        return el ? el.value.trim() : '';
+    }
+
     function promptClassKeyModal(sessionId) {
         return new Promise((resolve) => {
             const modal = document.getElementById('class-key-modal');
@@ -626,7 +631,7 @@
 
             modal.dataset.sessionId = sessionId;
             input.value = '';
-            modal.style.display = '';
+            modal.style.display = 'flex';
             modal.setAttribute('aria-hidden', 'false');
             input.focus();
 
@@ -729,12 +734,69 @@
         }
     }
 
-    async function saveSessionAccessSettings() {
+    function syncSessionAccessModalFields() {
+        const sel = document.getElementById('session-access-modal-select');
+        const keyInput = document.getElementById('session-access-modal-key');
+        const keyGroup = document.getElementById('session-access-modal-key-group');
+        const hint = document.getElementById('session-access-modal-key-hint');
+        if (!sel) return;
+
+        const isPublic = state.sessionIsPublic !== false;
+        sel.value = isPublic ? 'public' : 'private';
+        if (keyGroup) keyGroup.style.display = isPublic ? 'none' : '';
+        if (keyInput) {
+            keyInput.value = '';
+            keyInput.placeholder = state.sessionHasClassKey
+                ? 'New class key (leave blank to keep current)'
+                : '4–64 characters';
+        }
+        if (hint) {
+            hint.textContent = state.sessionHasClassKey
+                ? 'A class key is already set. Enter a new one only if you want to change it.'
+                : 'Students will need this key to join when the session is private.';
+        }
+    }
+
+    function closeSessionAccessModal() {
+        const modal = document.getElementById('session-access-modal');
+        if (!modal) return;
+        modal.style.display = 'none';
+        modal.setAttribute('aria-hidden', 'true');
+    }
+
+    function openSessionAccessModal() {
+        if (!state.currentSession) {
+            showToast('Open a session first', 'error');
+            return;
+        }
+        if (!userCanManageSessionSettings()) {
+            showToast('Only the session owner or site admin can change access', 'error');
+            return;
+        }
+        const modal = document.getElementById('session-access-modal');
+        if (!modal) return;
+        syncSessionAccessModalFields();
+        modal.style.display = 'flex';
+        modal.setAttribute('aria-hidden', 'false');
+        document.getElementById('session-access-modal-key')?.focus();
+    }
+
+    async function saveSessionAccessSettings(fromModal) {
         if (!state.currentSession || !userCanManageSessionSettings()) return;
-        const sel = document.getElementById('session-access-select');
-        const keyInput = document.getElementById('session-class-key-input');
-        const isPublic = sel && sel.value === 'public';
-        const classKey = keyInput ? keyInput.value.trim() : '';
+
+        let isPublic;
+        let classKey = '';
+        if (fromModal) {
+            const sel = document.getElementById('session-access-modal-select');
+            const keyInput = document.getElementById('session-access-modal-key');
+            isPublic = sel && sel.value === 'public';
+            classKey = keyInput ? keyInput.value.trim() : '';
+        } else {
+            const sel = document.getElementById('session-access-select');
+            const keyInput = document.getElementById('session-class-key-input');
+            isPublic = sel && sel.value === 'public';
+            classKey = keyInput ? keyInput.value.trim() : '';
+        }
 
         if (!isPublic && !classKey && !state.sessionHasClassKey) {
             showToast('Enter a class key for private sessions (4–64 characters)', 'error');
@@ -752,7 +814,10 @@
             state.sessionIsPublic = s.isPublic !== false;
             state.sessionHasClassKey = !!s.hasClassKey;
             updateSessionAccessUI();
-            if (keyInput) keyInput.value = '';
+            syncSessionAccessModalFields();
+            document.getElementById('session-class-key-input') &&
+                (document.getElementById('session-class-key-input').value = '');
+            if (fromModal) closeSessionAccessModal();
             showToast(result.message || 'Access settings saved', 'success');
         } catch (err) {
             showToast(err.message || 'Failed to save access settings', 'error');
@@ -1421,7 +1486,8 @@
         document.getElementById('join-session-btn')?.addEventListener('click', () => {
             const id = document.getElementById('join-session-id')?.value?.trim();
             if (!id) return showToast('Enter a session ID', 'error');
-            openEditor(id);
+            const classKey = getDashboardClassKey();
+            openEditor(id, classKey ? { classKey } : {});
         });
 
         document.getElementById('join-session-id')?.addEventListener('keydown', (e) => {
@@ -1985,20 +2051,22 @@
     }
 
     // ─── Open Editor ───
-    async function openEditor(sessionId) {
-        showView('editor');
-
-        // Show loading state in editor
-        const container = document.getElementById('editor-container');
-        container.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-muted);">Loading editor...</div>';
+    async function openEditor(sessionId, options = {}) {
+        const initialClassKey = options.classKey || state.pendingClassKey || getDashboardClassKey() || null;
+        if (initialClassKey) state.pendingClassKey = initialClassKey;
 
         try {
-            // Load Monaco modules
-            await loadMonaco();
-
-            const sessionData = await openEditorWithAccess(sessionId, state.pendingClassKey);
+            const sessionData = await openEditorWithAccess(sessionId, initialClassKey || undefined);
             const socketClassKey = state.pendingClassKey;
             state.pendingClassKey = null;
+
+            showView('editor');
+
+            // Show loading state in editor
+            const container = document.getElementById('editor-container');
+            container.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-muted);">Loading editor...</div>';
+
+            await loadMonaco();
 
             state.currentSession = sessionId;
             state.sessionIsPublic = sessionData.isPublic !== false;
@@ -2222,6 +2290,7 @@
             state.sessionIsPublic = data.isPublic !== false;
             state.sessionHasClassKey = !!data.hasClassKey;
             updateSessionAccessUI();
+            syncSessionAccessModalFields();
         });
 
         state.socket.on('reference-pdf-changed', (data) => {
@@ -3124,8 +3193,18 @@
             if (keyInput) keyInput.style.display = isPublic ? 'none' : '';
         });
         document.getElementById('session-access-save-btn')?.addEventListener('click', () => {
-            saveSessionAccessSettings();
+            saveSessionAccessSettings(false);
         });
+        document.getElementById('session-access-modal-select')?.addEventListener('change', () => {
+            const keyGroup = document.getElementById('session-access-modal-key-group');
+            const isPublic = document.getElementById('session-access-modal-select')?.value === 'public';
+            if (keyGroup) keyGroup.style.display = isPublic ? 'none' : '';
+        });
+        document.getElementById('session-access-modal-save')?.addEventListener('click', () => {
+            saveSessionAccessSettings(true);
+        });
+        document.getElementById('session-access-modal-cancel')?.addEventListener('click', closeSessionAccessModal);
+        document.getElementById('session-access-modal-backdrop')?.addEventListener('click', closeSessionAccessModal);
         document.getElementById('pdf-split-close')?.addEventListener('click', () => togglePdfSplit(false));
 
         document.getElementById('clear-output-btn')?.addEventListener('click', () => {
@@ -3168,6 +3247,9 @@
                     document.getElementById('import-folder-input')?.click();
                 }
                 else if (action === 'import-github') importGitHubIntoCurrentSession();
+                else if (action === 'session-access-settings') {
+                    openSessionAccessModal();
+                }
                 else if (action === 'attach-pdf') {
                     if (!userCanManageSessionSettings()) {
                         showToast('Only the session owner or site admin can attach a PDF', 'error');
