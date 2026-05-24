@@ -552,6 +552,50 @@
         return state.userRole === 'owner' || state.userRole === 'editor' || state.userRole === 'admin';
     }
 
+    function fileDocFromPayload(fileData) {
+        if (!fileData) return '';
+        if (fileData.doc != null && String(fileData.doc).length > 0) return String(fileData.doc);
+        if (fileData.content != null) return String(fileData.content);
+        return '';
+    }
+
+    function layoutMonacoEditor() {
+        if (!state.editorView) return;
+        requestAnimationFrame(() => {
+            try {
+                state.editorView.layout();
+            } catch (_) { /* ignore */ }
+        });
+    }
+
+    function hydrateFilesFromSessionPayload(sessionData) {
+        const list = sessionData && sessionData.files;
+        if (!Array.isArray(list) || !list.length) return null;
+
+        state.files.clear();
+        state.openTabs.clear();
+        state.tabOrder = [];
+        let firstFileId = null;
+        for (const f of list) {
+            if (!f || !f.id) continue;
+            const doc = fileDocFromPayload(f);
+            const lang = resolveEditorLanguage({
+                name: f.name,
+                language: f.language,
+                doc
+            });
+            state.files.set(f.id, {
+                id: f.id,
+                name: f.name,
+                doc,
+                language: lang,
+                version: 0
+            });
+            if (!firstFileId) firstFileId = f.id;
+        }
+        return firstFileId;
+    }
+
     function userCanManageSessionSettings() {
         if (state.userRole === 'owner' || state.userRole === 'admin') return true;
         if (state.user && state.user.role === 'admin') return true;
@@ -885,7 +929,7 @@
         let firstFileId = null;
         const entries = Object.entries(clientFiles || {});
         for (const [id, fileData] of entries) {
-            const doc = fileData.doc || '';
+            const doc = fileDocFromPayload(fileData);
             const lang = resolveEditorLanguage({
                 name: fileData.name,
                 language: fileData.language,
@@ -1544,6 +1588,7 @@
         });
 
         updateStdinHintForCode(doc);
+        layoutMonacoEditor();
         return editor;
     }
 
@@ -1795,6 +1840,12 @@
             container.innerHTML = '';
             if (state.editorView) {
                 state.editorView.dispose();
+                state.editorView = null;
+            }
+
+            const firstFromApi = hydrateFilesFromSessionPayload(sessionData);
+            if (firstFromApi) {
+                openFile(firstFromApi);
             }
 
             applySessionMeta({
@@ -1859,11 +1910,12 @@
             // Load files
             state.files.clear();
             state.openTabs.clear();
+            state.tabOrder = [];
             
             let firstFileId = null;
             if (data.files && Object.keys(data.files).length > 0) {
                 for (const [id, fileData] of Object.entries(data.files)) {
-                    const doc = fileData.doc || '';
+                    const doc = fileDocFromPayload(fileData);
                     const lang = resolveEditorLanguage({
                         name: fileData.name,
                         language: fileData.language,
@@ -2405,6 +2457,7 @@
         updateStdinHintForCode(file.doc);
         renderFileTree();
         renderTabs();
+        layoutMonacoEditor();
         updateRemoteSelections();
     };
 
@@ -3084,6 +3137,11 @@
 
         initEditorDragDrop();
         initTabDragReorder();
+
+        if (!window.__codemeshEditorResizeBound) {
+            window.__codemeshEditorResizeBound = true;
+            window.addEventListener('resize', () => layoutMonacoEditor());
+        }
     }
 
     // ─── Code Execution ───

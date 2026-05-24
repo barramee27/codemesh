@@ -43,6 +43,54 @@ function getColor(index) {
     return USER_COLORS[index % USER_COLORS.length];
 }
 
+function dbFilesToMemoryMap(dbFiles) {
+    const map = new Map();
+    (dbFiles || []).forEach((f) => {
+        map.set(f.id, {
+            id: f.id,
+            name: f.name,
+            doc: f.content != null ? String(f.content) : '',
+            language: f.language || 'plaintext',
+            version: 0,
+            history: []
+        });
+    });
+    return map;
+}
+
+/** Merge MongoDB file contents into live session memory (DB is source of truth when memory is empty). */
+async function syncSessionFilesFromDatabase(sessionId, state) {
+    const dbSession = await Session.findOne({ sessionId });
+    if (!dbSession) return null;
+
+    if (dbSession.files && dbSession.files.length > 0) {
+        const dbMap = dbFilesToMemoryMap(dbSession.files);
+        dbMap.forEach((dbFile, id) => {
+            const mem = state.files.get(id);
+            const memDoc = mem && mem.doc != null ? String(mem.doc) : '';
+            state.files.set(id, {
+                ...dbFile,
+                version: mem ? mem.version : 0,
+                history: mem ? mem.history : [],
+                doc: memDoc.length > 0 ? memDoc : dbFile.doc
+            });
+        });
+    } else if (dbSession.code) {
+        const defaultFileId = 'main_file';
+        const mem = state.files.get(defaultFileId);
+        const memDoc = mem && mem.doc != null ? String(mem.doc) : '';
+        state.files.set(defaultFileId, {
+            id: defaultFileId,
+            name: 'snippet.txt',
+            doc: memDoc.length > 0 ? memDoc : (dbSession.code || ''),
+            language: dbSession.language || 'plaintext',
+            version: mem ? mem.version : 0,
+            history: mem ? mem.history : []
+        });
+    }
+    return dbSession;
+}
+
 // Helper function to check if user is guest and delete if no sessions remain
 async function deleteGuestIfNoSessions(userId) {
     try {
@@ -177,39 +225,12 @@ module.exports = function setupCollaboration(io) {
             socket.username = username;
             socket.userId = userId;
 
-            // Load from DB if fresh
+            // Always merge file contents from MongoDB (fixes empty editor when memory was stale)
             let dbSession = null;
-            if (state.users.size === 0) {
-                try {
-                    dbSession = await Session.findOne({ sessionId });
-                    if (dbSession) {
-                        // Migrate legacy single-file sessions to multi-file
-                        if (!dbSession.files || dbSession.files.length === 0) {
-                            const defaultFileId = 'main_file';
-                            state.files.set(defaultFileId, {
-                                id: defaultFileId,
-                                name: 'snippet.txt',
-                                doc: dbSession.code || '',
-                                language: dbSession.language || 'plaintext',
-                                version: 0,
-                                history: []
-                            });
-                        } else {
-                            dbSession.files.forEach(f => {
-                                state.files.set(f.id, {
-                                    id: f.id,
-                                    name: f.name,
-                                    doc: f.content || '',
-                                    language: f.language || 'plaintext',
-                                    version: 0,
-                                    history: []
-                                });
-                            });
-                        }
-                    }
-                } catch (err) {
-                    console.error('Load session error:', err.message);
-                }
+            try {
+                dbSession = await syncSessionFilesFromDatabase(sessionId, state);
+            } catch (err) {
+                console.error('Load session error:', err.message);
             }
 
             // Determine the user's role in this session
@@ -362,21 +383,6 @@ module.exports = function setupCollaboration(io) {
             const u = state.users.get(socketId);
             if (!u) return false;
             return u.role === 'owner' || u.role === 'editor' || u.role === 'admin';
-        }
-
-        function dbFilesToMemoryMap(dbFiles) {
-            const map = new Map();
-            (dbFiles || []).forEach((f) => {
-                map.set(f.id, {
-                    id: f.id,
-                    name: f.name,
-                    doc: f.content || '',
-                    language: f.language || 'plaintext',
-                    version: 0,
-                    history: []
-                });
-            });
-            return map;
         }
 
         function clientFilesPayload(state) {

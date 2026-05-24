@@ -1089,9 +1089,9 @@ select.input-full {
 .editor-main {
   display: flex;
   flex-direction: column;
-  height: calc(100vh - 52px);
-  overflow: auto;
+  flex: 1;
   min-height: 0;
+  overflow: hidden;
 }
 
 /* ═══════════════ EDITOR OVERRIDES ═══════════════ */
@@ -1121,6 +1121,7 @@ select.input-full {
 .editor-split-container {
   display: flex;
   flex: 1;
+  width: 100%;
   min-height: 0;
   overflow: hidden;
 }
@@ -1525,6 +1526,7 @@ select.input-full {
 .vscode-tabs-container {
   display: flex;
   height: 35px;
+  flex-shrink: 0;
   background: var(--vscode-tabs-bg);
   overflow-x: auto;
   overflow-y: hidden;
