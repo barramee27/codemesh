@@ -491,6 +491,24 @@
       </div>
 
       <!-- Create Session Modal -->
+      <div id="class-key-modal" class="modal" style="display:none;" aria-hidden="true">
+        <div class="modal-backdrop" id="class-key-modal-backdrop"></div>
+        <div class="modal-content">
+          <h3 class="modal-title">Private session</h3>
+          <p class="form-hint" style="margin:0 0 12px;color:var(--text-muted);">
+            This session requires a class key. Enter the key from your teacher to join.
+          </p>
+          <div class="form-group">
+            <label for="class-key-modal-input">Class key</label>
+            <input type="password" id="class-key-modal-input" class="input-full" placeholder="Enter class key" maxlength="64" autocomplete="off" />
+          </div>
+          <div class="modal-actions">
+            <button type="button" class="btn btn-ghost" id="class-key-modal-cancel">Cancel</button>
+            <button type="button" class="btn btn-primary" id="class-key-modal-submit">Join session</button>
+          </div>
+        </div>
+      </div>
+
       <div id="create-modal" class="modal" style="display:none;">
         <div class="modal-backdrop"></div>
         <div class="modal-content">
@@ -618,6 +636,14 @@
             <option value="viewer">Viewer</option>
           </select>
         </label>
+        <div id="session-access-wrap" class="session-access-wrap" style="display:none;" title="Public sessions are open to anyone with the link; private sessions require a class key">
+          <select id="session-access-select" class="join-policy-select" aria-label="Session visibility">
+            <option value="public">Public</option>
+            <option value="private">Private</option>
+          </select>
+          <input type="password" id="session-class-key-input" class="session-class-key-input" placeholder="Class key" maxlength="64" autocomplete="off" style="display:none;" />
+          <button type="button" class="btn btn-xs btn-secondary" id="session-access-save-btn" title="Save access settings">Save</button>
+        </div>
       </div>
       <div class="vscode-titlebar-right">
         <div class="collaborators" id="collaborators-list">

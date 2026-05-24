@@ -9,6 +9,15 @@ const User = require('../models/User');
 const authMiddleware = require('../middleware/auth');
 const { fetchPublicRepoFiles, languageFromFilename, textLikeFile, shouldSkipPath } = require('../utils/githubImport');
 const { MAX_FILES, MAX_FILE_BYTES, MAX_TOTAL_BYTES } = require('../utils/sessionImportLimits');
+const {
+    CLASS_KEY_MIN,
+    CLASS_KEY_MAX,
+    isSessionOwner,
+    sessionIsOwnerOrSiteAdmin,
+    ensureSessionAccess,
+    hashClassKey,
+    sanitizeSessionForClient
+} = require('../utils/sessionAccess');
 
 const UPLOADS_DIR = path.join(__dirname, '..', 'uploads');
 if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true });
@@ -42,10 +51,6 @@ function sessionCanEdit(session, userId, isAdmin) {
     if (session.owner.toString() === userId) return true;
     const collab = session.collaborators.find((c) => c.user.toString() === userId);
     return !!(collab && collab.role === 'editor');
-}
-
-function sessionIsOwnerOrSiteAdmin(session, userId, isAdmin) {
-    return isAdmin || session.owner.toString() === userId;
 }
 
 function referencePdfPayload(session) {
@@ -113,18 +118,26 @@ router.post('/join-or-create', authMiddleware, async (req, res) => {
         }
 
         let session = await Session.findOne({ sessionId: raw })
+            .select('+classKeyHash')
             .populate('owner', 'username')
             .populate('collaborators.user', 'username');
 
         if (session) {
-            const isOwner = session.owner._id.toString() === req.user.id;
-            const isCollab = session.collaborators.some(
-                c => c.user && c.user._id.toString() === req.user.id
-            );
-            if (!session.isPublic && !isOwner && !isCollab) {
-                return res.status(403).json({ error: 'This session is private' });
+            const access = await ensureSessionAccess(session, {
+                userId: req.user.id,
+                userRole: req.user.role,
+                classKey: req.body.classKey
+            });
+            if (!access.ok) {
+                return res.status(access.status).json({
+                    error: access.error,
+                    code: access.code,
+                    requiresClassKey: access.requiresClassKey
+                });
             }
-            return res.json(session);
+            await access.session.populate('owner', 'username');
+            await access.session.populate('collaborators.user', 'username');
+            return res.json(sanitizeSessionForClient(access.session));
         }
 
         const fileId = 'f_' + uuidv4().split('-')[0];
@@ -144,7 +157,7 @@ router.post('/join-or-create', authMiddleware, async (req, res) => {
         });
         await session.save();
         await session.populate('owner', 'username');
-        return res.status(201).json(session);
+        return res.status(201).json(sanitizeSessionForClient(session));
     } catch (err) {
         console.error('join-or-create error:', err);
         return res.status(500).json({ error: 'Failed to open or create session' });
@@ -325,16 +338,30 @@ router.get('/:id', async (req, res) => {
             } catch (e) { /* invalid token */ }
         }
 
-        const isOwner = userId && session.owner._id.toString() === userId;
-        const isCollab = userId && session.collaborators.some(c => c.user && c.user._id.toString() === userId);
-        if (!session.isPublic && !isOwner && !isCollab) {
-            if (!userId) {
-                return res.status(401).json({ error: 'Authentication required' });
-            }
-            return res.status(403).json({ error: 'You do not have access to this session' });
+        if (!userId) {
+            return res.status(401).json({ error: 'Authentication required' });
         }
 
-        res.json(session);
+        let userRole = 'user';
+        try {
+            const u = await User.findById(userId).select('role');
+            if (u) userRole = u.role;
+        } catch (_) { /* ignore */ }
+
+        const access = await ensureSessionAccess(session, {
+            userId,
+            userRole,
+            classKey: req.query.classKey
+        });
+        if (!access.ok) {
+            return res.status(access.status).json({
+                error: access.error,
+                code: access.code,
+                requiresClassKey: access.requiresClassKey
+            });
+        }
+
+        res.json(sanitizeSessionForClient(access.session));
     } catch (err) {
         console.error('Get session error:', err);
         res.status(500).json({ error: 'Failed to get session' });
@@ -374,6 +401,58 @@ router.put('/:id', authMiddleware, async (req, res) => {
     } catch (err) {
         console.error('Update session error:', err);
         res.status(500).json({ error: 'Failed to update session' });
+    }
+});
+
+// PUT /api/sessions/:id/access — public/private + class key (owner or site admin)
+router.put('/:id/access', authMiddleware, async (req, res) => {
+    try {
+        const session = await Session.findOne({ sessionId: req.params.id }).select('+classKeyHash');
+        if (!session) return res.status(404).json({ error: 'Session not found' });
+
+        const isAdmin = req.user.role === 'admin';
+        if (!sessionIsOwnerOrSiteAdmin(session, req.user.id, isAdmin)) {
+            return res.status(403).json({ error: 'Only the session owner or site admin can change access settings' });
+        }
+
+        if (typeof req.body.isPublic === 'boolean') {
+            session.isPublic = req.body.isPublic;
+        }
+
+        if (session.isPublic) {
+            session.classKeyHash = undefined;
+            session.keyAccess = [];
+        } else {
+            const newKey = req.body.classKey != null ? String(req.body.classKey).trim() : '';
+            if (newKey) {
+                session.classKeyHash = await hashClassKey(newKey);
+            } else if (!session.classKeyHash) {
+                return res.status(400).json({
+                    error: `Private sessions need a class key (${CLASS_KEY_MIN}–${CLASS_KEY_MAX} characters)`
+                });
+            }
+        }
+
+        session.updatedAt = Date.now();
+        await session.save();
+        await session.populate('owner', 'username');
+
+        const io = req.app.get('io');
+        if (io) {
+            io.to(session.sessionId).emit('access-settings-changed', {
+                isPublic: session.isPublic,
+                requiresClassKey: session.isPublic === false,
+                hasClassKey: !!session.classKeyHash
+            });
+        }
+
+        res.json({
+            message: session.isPublic ? 'Session is now public' : 'Session is now private (class key required)',
+            session: sanitizeSessionForClient(session)
+        });
+    } catch (err) {
+        console.error('session access settings:', err);
+        res.status(400).json({ error: err.message || 'Failed to update access settings' });
     }
 });
 

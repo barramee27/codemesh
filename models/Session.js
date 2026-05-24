@@ -63,6 +63,16 @@ const sessionSchema = new mongoose.Schema({
         type: Boolean,
         default: true
     },
+    /** Bcrypt hash of class key (private sessions only). Never sent to clients. */
+    classKeyHash: {
+        type: String,
+        select: false
+    },
+    /** Users who entered the correct class key and may rejoin without re-entering it. */
+    keyAccess: [{
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User'
+    }],
     /** Role assigned to new collaborators when they first join (owner chooses editor or viewer). */
     defaultJoinRole: {
         type: String,

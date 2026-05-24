@@ -31,6 +31,9 @@
         referencePdf: null, // { url, originalName } | null
         pdfSplitVisible: false,
         sessionOwnerId: null,
+        sessionIsPublic: true,
+        sessionHasClassKey: false,
+        pendingClassKey: null,
         splitEditor: null,
         splitActive: false,
         terminal: null,
@@ -87,7 +90,13 @@
                 );
             }
         }
-        if (!res.ok) throw new Error((data && data.error) || `Request failed (${res.status})`);
+        if (!res.ok) {
+            const err = new Error((data && data.error) || `Request failed (${res.status})`);
+            err.status = res.status;
+            err.code = data && data.code;
+            err.payload = data;
+            throw err;
+        }
         return data;
     }
 
@@ -603,6 +612,153 @@
         return !!(state.sessionOwnerId && uid && state.sessionOwnerId.toString() === uid.toString());
     }
 
+    function promptClassKeyModal(sessionId) {
+        return new Promise((resolve) => {
+            const modal = document.getElementById('class-key-modal');
+            const input = document.getElementById('class-key-modal-input');
+            const submit = document.getElementById('class-key-modal-submit');
+            const cancel = document.getElementById('class-key-modal-cancel');
+            const backdrop = document.getElementById('class-key-modal-backdrop');
+            if (!modal || !input || !submit) {
+                resolve(null);
+                return;
+            }
+
+            modal.dataset.sessionId = sessionId;
+            input.value = '';
+            modal.style.display = '';
+            modal.setAttribute('aria-hidden', 'false');
+            input.focus();
+
+            const cleanup = () => {
+                submit.removeEventListener('click', onSubmit);
+                cancel?.removeEventListener('click', onCancel);
+                backdrop?.removeEventListener('click', onCancel);
+                input.removeEventListener('keydown', onKey);
+            };
+
+            const close = (value) => {
+                modal.style.display = 'none';
+                modal.setAttribute('aria-hidden', 'true');
+                cleanup();
+                resolve(value);
+            };
+
+            const onSubmit = () => {
+                const key = input.value.trim();
+                if (!key) {
+                    showToast('Enter the class key', 'error');
+                    return;
+                }
+                close(key);
+            };
+
+            const onCancel = () => close(null);
+            const onKey = (e) => {
+                if (e.key === 'Enter') { e.preventDefault(); onSubmit(); }
+                if (e.key === 'Escape') onCancel();
+            };
+
+            submit.addEventListener('click', onSubmit);
+            cancel?.addEventListener('click', onCancel);
+            backdrop?.addEventListener('click', onCancel);
+            input.addEventListener('keydown', onKey);
+        });
+    }
+
+    async function joinOrOpenSession(sessionId, classKey) {
+        const body = { sessionId, title: sessionId };
+        if (classKey) body.classKey = classKey;
+        return api('/sessions/join-or-create', {
+            method: 'POST',
+            body: JSON.stringify(body)
+        });
+    }
+
+    async function openEditorWithAccess(sessionId, classKey) {
+        let sessionData;
+        try {
+            sessionData = await joinOrOpenSession(sessionId, classKey);
+            if (classKey) state.pendingClassKey = classKey;
+        } catch (err) {
+            if (err.code === 'CLASS_KEY_REQUIRED' || err.code === 'CLASS_KEY_INVALID') {
+                if (err.code === 'CLASS_KEY_INVALID') {
+                    showToast('Invalid class key — try again', 'error');
+                }
+                const key = await promptClassKeyModal(sessionId);
+                if (!key) {
+                    const e = new Error('Join cancelled');
+                    e.cancelled = true;
+                    throw e;
+                }
+                try {
+                    sessionData = await joinOrOpenSession(sessionId, key);
+                    state.pendingClassKey = key;
+                } catch (err2) {
+                    if (err2.code === 'CLASS_KEY_INVALID') {
+                        showToast('Invalid class key', 'error');
+                        return openEditorWithAccess(sessionId, null);
+                    }
+                    throw err2;
+                }
+            } else {
+                throw err;
+            }
+        }
+        return sessionData;
+    }
+
+    function updateSessionAccessUI() {
+        const wrap = document.getElementById('session-access-wrap');
+        const sel = document.getElementById('session-access-select');
+        const keyInput = document.getElementById('session-class-key-input');
+        if (!wrap || !sel) return;
+
+        const show = userCanManageSessionSettings();
+        wrap.style.display = show ? '' : 'none';
+        if (!show) return;
+
+        const isPublic = state.sessionIsPublic !== false;
+        sel.value = isPublic ? 'public' : 'private';
+        if (keyInput) {
+            keyInput.style.display = isPublic ? 'none' : '';
+            keyInput.value = '';
+            keyInput.placeholder = state.sessionHasClassKey
+                ? 'New class key (optional)'
+                : 'Class key (required)';
+        }
+    }
+
+    async function saveSessionAccessSettings() {
+        if (!state.currentSession || !userCanManageSessionSettings()) return;
+        const sel = document.getElementById('session-access-select');
+        const keyInput = document.getElementById('session-class-key-input');
+        const isPublic = sel && sel.value === 'public';
+        const classKey = keyInput ? keyInput.value.trim() : '';
+
+        if (!isPublic && !classKey && !state.sessionHasClassKey) {
+            showToast('Enter a class key for private sessions (4–64 characters)', 'error');
+            return;
+        }
+
+        try {
+            const body = { isPublic };
+            if (!isPublic && classKey) body.classKey = classKey;
+            const result = await api(`/sessions/${state.currentSession}/access`, {
+                method: 'PUT',
+                body: JSON.stringify(body)
+            });
+            const s = result.session || {};
+            state.sessionIsPublic = s.isPublic !== false;
+            state.sessionHasClassKey = !!s.hasClassKey;
+            updateSessionAccessUI();
+            if (keyInput) keyInput.value = '';
+            showToast(result.message || 'Access settings saved', 'success');
+        } catch (err) {
+            showToast(err.message || 'Failed to save access settings', 'error');
+        }
+    }
+
     const IMPORT_MAX_FILES = 120;
     const IMPORT_MAX_FILE_BYTES = 5 * 1024 * 1024;
     const IMPORT_MAX_TOTAL_BYTES = 50 * 1024 * 1024;
@@ -678,8 +834,15 @@
             const o = meta.owner;
             state.sessionOwnerId = (o._id || o.id || o).toString();
         }
+        if (meta.isPublic !== undefined) {
+            state.sessionIsPublic = meta.isPublic !== false;
+        }
+        if (meta.hasClassKey !== undefined) {
+            state.sessionHasClassKey = !!meta.hasClassKey;
+        }
         updateJoinPolicyUI();
         updateReferencePdfUI();
+        updateSessionAccessUI();
     }
 
     function togglePdfSplit(force) {
@@ -1179,7 +1342,7 @@
         grid.innerHTML = sessions.map(s => `
       <div class="session-card" data-session-id="${s.sessionId}">
         <div class="session-card-header">
-          <div class="session-card-title">${escapeHtml(s.title)}</div>
+          <div class="session-card-title">${escapeHtml(s.title)}${s.isPublic === false ? '<span class="session-card-private-badge" title="Private — class key required">🔒 Private</span>' : ''}</div>
           <span class="session-card-lang">${s.language}</span>
         </div>
         <div class="session-card-meta">
@@ -1833,13 +1996,13 @@
             // Load Monaco modules
             await loadMonaco();
 
-            // Load or create session (shareable URL; requires guest/auth token)
-            const sessionData = await api('/sessions/join-or-create', {
-                method: 'POST',
-                body: JSON.stringify({ sessionId, title: sessionId })
-            });
+            const sessionData = await openEditorWithAccess(sessionId, state.pendingClassKey);
+            const socketClassKey = state.pendingClassKey;
+            state.pendingClassKey = null;
 
             state.currentSession = sessionId;
+            state.sessionIsPublic = sessionData.isPublic !== false;
+            state.sessionHasClassKey = !!sessionData.hasClassKey;
             if (state.terminal) { state.terminal.dispose(); state.terminal = null; }
 
             // Update URL to /sessionId for shareable links
@@ -1877,24 +2040,28 @@
             applySessionMeta({
                 defaultJoinRole: sessionData.defaultJoinRole,
                 referencePdf: normalizeReferencePdf(sessionData),
-                owner: sessionData.owner
+                owner: sessionData.owner,
+                isPublic: sessionData.isPublic,
+                hasClassKey: sessionData.hasClassKey
             });
 
             // Connect WebSocket
-            connectSocket(sessionId, sessionData);
+            connectSocket(sessionId, sessionData, socketClassKey);
             restoreRunStdin();
             initWorkspaceDragDrop();
             initTabDragReorder();
 
         } catch (err) {
             setDocumentTitle(DEFAULT_DOC_TITLE);
-            showToast('Failed to open editor: ' + err.message, 'error');
+            if (!err.cancelled) {
+                showToast('Failed to open editor: ' + err.message, 'error');
+            }
             loadDashboard();
         }
     }
 
     // ─── WebSocket Connection ───
-    function connectSocket(sessionId, sessionData) {
+    function connectSocket(sessionId, sessionData, classKey) {
         if (state.socket) {
             state.socket.disconnect();
         }
@@ -1910,7 +2077,8 @@
             state.socket.emit('join-session', {
                 sessionId,
                 username: state.user ? state.user.username : 'Anonymous',
-                userId: state.user ? (state.user.id || state.user._id) : null
+                userId: state.user ? (state.user.id || state.user._id) : null,
+                classKey: classKey || undefined
             });
         });
 
@@ -2047,6 +2215,13 @@
             if (!data) return;
             state.defaultJoinRole = data.defaultJoinRole === 'viewer' ? 'viewer' : 'editor';
             updateJoinPolicyUI();
+        });
+
+        state.socket.on('access-settings-changed', (data) => {
+            if (!data) return;
+            state.sessionIsPublic = data.isPublic !== false;
+            state.sessionHasClassKey = !!data.hasClassKey;
+            updateSessionAccessUI();
         });
 
         state.socket.on('reference-pdf-changed', (data) => {
@@ -2942,6 +3117,14 @@
         });
         document.getElementById('join-policy-select')?.addEventListener('change', (e) => {
             setDefaultJoinRole(e.target.value);
+        });
+        document.getElementById('session-access-select')?.addEventListener('change', () => {
+            const keyInput = document.getElementById('session-class-key-input');
+            const isPublic = document.getElementById('session-access-select')?.value === 'public';
+            if (keyInput) keyInput.style.display = isPublic ? 'none' : '';
+        });
+        document.getElementById('session-access-save-btn')?.addEventListener('click', () => {
+            saveSessionAccessSettings();
         });
         document.getElementById('pdf-split-close')?.addEventListener('click', () => togglePdfSplit(false));
 

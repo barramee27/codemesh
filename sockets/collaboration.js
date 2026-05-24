@@ -1,6 +1,7 @@
 const Session = require('../models/Session');
 const User = require('../models/User');
 const { transformOp, applyOp } = require('../utils/ot');
+const { ensureSessionAccess } = require('../utils/sessionAccess');
 
 // In-memory state for active sessions
 const activeSessions = new Map();
@@ -184,27 +185,34 @@ module.exports = function setupCollaboration(io) {
     io.on('connection', (socket) => {
 
         socket.on('join-session', async (data) => {
-            const { sessionId } = data;
+            const { sessionId, classKey } = data;
             if (!sessionId) return;
 
             // Use server-verified user from auth middleware (client values are ignored)
             const username = socket.user ? socket.user.username : 'Anonymous';
             const userId = socket.user ? socket.user.id : null;
 
-            // Validate session access
+            let verifiedDbSession = null;
+            // Validate session access (public, owner, collab, admin, or class key)
             try {
-                const dbSession = await Session.findOne({ sessionId });
-                if (!dbSession) {
+                verifiedDbSession = await Session.findOne({ sessionId }).select('+classKeyHash');
+                if (!verifiedDbSession) {
                     socket.emit('join-error', { message: 'Session not found' });
                     return;
                 }
-                const isOwner = userId && dbSession.owner.toString() === userId;
-                const isCollab = userId && dbSession.collaborators.some(c => c.user.toString() === userId);
-                const isAdmin = socket.user && socket.user.role === 'admin';
-                if (!dbSession.isPublic && !isOwner && !isCollab && !isAdmin) {
-                    socket.emit('join-error', { message: 'You do not have access to this session' });
+                const access = await ensureSessionAccess(verifiedDbSession, {
+                    userId,
+                    userRole: socket.user ? socket.user.role : null,
+                    classKey
+                });
+                if (!access.ok) {
+                    socket.emit('join-error', {
+                        message: access.error,
+                        code: access.code
+                    });
                     return;
                 }
+                verifiedDbSession = access.session;
             } catch (err) {
                 socket.emit('join-error', { message: 'Failed to verify session access' });
                 return;
@@ -238,9 +246,7 @@ module.exports = function setupCollaboration(io) {
             if (socket.user && socket.user.role === 'admin') {
                 userRole = 'admin';
             } else if (!dbSession) {
-                try {
-                    dbSession = await Session.findOne({ sessionId });
-                } catch (err) { /* ignore */ }
+                dbSession = verifiedDbSession;
             }
 
             if (userRole !== 'admin' && dbSession && userId) {

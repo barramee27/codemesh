@@ -3390,6 +3390,32 @@ select.input-full {
   font-size: 12px;
 }
 
+.session-access-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 8px;
+}
+
+.session-class-key-input {
+  width: 110px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  border: 1px solid var(--vscode-border);
+  background: var(--vscode-input-bg);
+  color: var(--vscode-input-fg);
+  font-size: 12px;
+}
+
+.session-card-private-badge {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #fbbf24;
+  margin-left: 6px;
+}
+
 .editor-main {
   position: relative;
   display: flex;
