@@ -551,7 +551,12 @@
               <div class="menubar-dropdown-item" data-action="new-file">New File</div>
               <div class="menubar-dropdown-item" data-action="import-folder">Import folder…</div>
               <div class="menubar-dropdown-item" data-action="import-github">Import from GitHub…</div>
+              <div class="menubar-dropdown-divider"></div>
+              <div class="menubar-dropdown-item" data-action="attach-pdf">Attach reference PDF…</div>
+              <div class="menubar-dropdown-item" data-action="remove-pdf">Remove reference PDF</div>
               <input type="file" id="import-folder-input" webkitdirectory directory multiple style="display:none" aria-hidden="true" />
+              <input type="file" id="import-files-input" multiple style="display:none" aria-hidden="true" />
+              <input type="file" id="session-pdf-input" accept="application/pdf,.pdf" style="display:none" aria-hidden="true" />
               <div class="menubar-dropdown-divider"></div>
               <div class="menubar-dropdown-item" data-action="save">Save</div>
             </div>
@@ -573,6 +578,7 @@
             <div class="menubar-dropdown">
               <div class="menubar-dropdown-item" data-action="toggle-sidebar">Toggle Sidebar</div>
               <div class="menubar-dropdown-item" data-action="toggle-panel">Toggle Panel</div>
+              <div class="menubar-dropdown-item" data-action="toggle-pdf-split">PDF + code split view</div>
             </div>
           </div>
           <div class="menubar-item" data-menu="go">Go
@@ -605,6 +611,13 @@
           Saved
         </span>
         <span class="role-badge" id="user-role-badge" style="display:none;"></span>
+        <label id="join-policy-wrap" class="join-policy-wrap" style="display:none;" title="Default role for people who open your invite link">
+          <span class="join-policy-label">New guests</span>
+          <select id="join-policy-select" class="join-policy-select">
+            <option value="editor">Editor</option>
+            <option value="viewer">Viewer</option>
+          </select>
+        </label>
       </div>
       <div class="vscode-titlebar-right">
         <div class="collaborators" id="collaborators-list">
@@ -702,7 +715,19 @@
       </div>
 
       <!-- Editor Main Area -->
-      <div class="editor-main">
+      <div class="editor-main" id="editor-main">
+        <div id="editor-drop-overlay" class="editor-drop-overlay" style="display:none;" aria-hidden="true">
+          <p>Drop files or folders to import</p>
+        </div>
+        <div id="editor-layout-split" class="editor-layout-split">
+          <aside id="pdf-split-pane" class="pdf-split-pane" style="display:none;">
+            <div class="pdf-split-header">
+              <span id="pdf-split-title">Reference PDF</span>
+              <button type="button" class="btn btn-icon btn-xs" id="pdf-split-close" title="Hide PDF pane"><i class="codicon codicon-close"></i></button>
+            </div>
+            <iframe id="session-pdf-viewer" class="session-pdf-viewer" title="Reference PDF"></iframe>
+          </aside>
+          <div id="editor-code-pane" class="editor-code-pane">
         <div class="vscode-tabs-container">
           <div class="editor-tabs" id="editor-tabs">
             <!-- Tabs populated here -->
@@ -734,8 +759,6 @@
             <div id="editor-container" class="editor-container"></div>
             <div id="editor-container-2" class="editor-container editor-split-second" style="display:none;"></div>
           </div>
-          
-          <!-- Line Comments Sidebar -->
           <div id="comments-sidebar" class="comments-sidebar" style="display:none;">
             <div class="comments-header">
               <span>Comments for line <span id="comments-line-num"></span></span>
@@ -746,6 +769,8 @@
               <textarea id="new-comment-input" placeholder="Add a comment..."></textarea>
               <button class="btn btn-primary btn-sm" id="submit-comment-btn">Comment</button>
             </div>
+          </div>
+        </div>
           </div>
         </div>
 
@@ -775,8 +800,8 @@
             </div>
           </div>
           <div id="output-panel-content" class="panel-content output-panel-stack">
-            <label class="run-stdin-label" for="run-stdin-input">Program input (stdin)</label>
-            <textarea id="run-stdin-input" class="run-stdin-input" rows="4" spellcheck="false" placeholder="Lines typed here are fed to your program when you Run (e.g. test data for scanf, input(), cin…)"></textarea>
+            <label class="run-stdin-label" for="run-stdin-input">Program input (stdin) <span id="run-stdin-hint" class="run-stdin-hint" style="display:none;">— this program reads input (cin, scanf, input(), etc.)</span></label>
+            <textarea id="run-stdin-input" class="run-stdin-input" rows="4" spellcheck="false" placeholder="Example for C++ with cin: first line = n, second line = n numbers&#10;5&#10;1 2 3 4 5"></textarea>
             <pre id="output-content" class="output-content"></pre>
           </div>
           <div id="preview-panel-content" class="panel-content" style="display:none;">

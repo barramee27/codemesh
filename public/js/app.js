@@ -26,6 +26,11 @@
         files: new Map(), // Map of fileId -> { id, name, doc, language, version }
         activeFileId: null,
         openTabs: new Set(), // Set of fileIds
+        tabOrder: [], // display order for open tabs (drag to reorder)
+        defaultJoinRole: 'editor', // default for new guests (owner sets)
+        referencePdf: null, // { url, originalName } | null
+        pdfSplitVisible: false,
+        sessionOwnerId: null,
         splitEditor: null,
         splitActive: false,
         terminal: null,
@@ -547,6 +552,300 @@
         return state.userRole === 'owner' || state.userRole === 'editor' || state.userRole === 'admin';
     }
 
+    function userCanManageSessionSettings() {
+        if (state.userRole === 'owner' || state.userRole === 'admin') return true;
+        if (state.user && state.user.role === 'admin') return true;
+        const uid = state.user && (state.user.id || state.user._id);
+        return !!(state.sessionOwnerId && uid && state.sessionOwnerId.toString() === uid.toString());
+    }
+
+    const IMPORT_MAX_FILES = 120;
+    const IMPORT_MAX_FILE_BYTES = 5 * 1024 * 1024;
+    const IMPORT_MAX_TOTAL_BYTES = 50 * 1024 * 1024;
+
+    function codeNeedsStdin(code) {
+        if (!code) return false;
+        return /\bcin\s*>>|\bscanf\s*\(|\breadln\s*\(|\binput\s*\(|\braw_input\s*\(|\bScanner\s*\(|\bgets\s*\(|\bgetline\s*\(/i.test(code);
+    }
+
+    function syncTabOrder() {
+        const order = state.tabOrder.filter((id) => state.openTabs.has(id));
+        state.openTabs.forEach((id) => {
+            if (!order.includes(id)) order.push(id);
+        });
+        state.tabOrder = order;
+    }
+
+    function updateJoinPolicyUI() {
+        const wrap = document.getElementById('join-policy-wrap');
+        const sel = document.getElementById('join-policy-select');
+        if (!wrap || !sel) return;
+        const show = userCanManageSessionSettings();
+        wrap.style.display = show ? '' : 'none';
+        if (show) sel.value = state.defaultJoinRole === 'viewer' ? 'viewer' : 'editor';
+    }
+
+    function updateReferencePdfUI() {
+        const pane = document.getElementById('pdf-split-pane');
+        const layout = document.getElementById('editor-layout-split');
+        const iframe = document.getElementById('session-pdf-viewer');
+        const title = document.getElementById('pdf-split-title');
+        if (!pane || !layout) return;
+        const hasPdf = !!(state.referencePdf && state.referencePdf.url);
+        if (hasPdf && title) {
+            title.textContent = state.referencePdf.originalName || 'Reference PDF';
+        }
+        if (iframe && hasPdf) {
+            iframe.src = state.referencePdf.url;
+        } else if (iframe && !hasPdf) {
+            iframe.removeAttribute('src');
+        }
+        const showSplit = hasPdf && state.pdfSplitVisible;
+        pane.style.display = showSplit ? '' : 'none';
+        layout.classList.toggle('pdf-split-active', showSplit);
+    }
+
+    function normalizeReferencePdf(sessOrPdf) {
+        if (!sessOrPdf) return null;
+        const rp = sessOrPdf.referencePdf != null ? sessOrPdf.referencePdf : sessOrPdf;
+        if (!rp) return null;
+        if (rp.url) return { url: rp.url, originalName: rp.originalName || 'reference.pdf' };
+        if (rp.storageName) {
+            return {
+                url: `/uploads/${rp.storageName}`,
+                originalName: rp.originalName || 'reference.pdf'
+            };
+        }
+        return null;
+    }
+
+    function applySessionMeta(meta) {
+        if (!meta) return;
+        if (meta.defaultJoinRole) {
+            state.defaultJoinRole = meta.defaultJoinRole === 'viewer' ? 'viewer' : 'editor';
+        }
+        if (meta.referencePdf !== undefined) {
+            state.referencePdf = meta.referencePdf
+                ? normalizeReferencePdf({ referencePdf: meta.referencePdf })
+                : null;
+            if (!state.referencePdf) state.pdfSplitVisible = false;
+        }
+        if (meta.owner) {
+            const o = meta.owner;
+            state.sessionOwnerId = (o._id || o.id || o).toString();
+        }
+        updateJoinPolicyUI();
+        updateReferencePdfUI();
+    }
+
+    function togglePdfSplit(force) {
+        if (!state.referencePdf || !state.referencePdf.url) {
+            showToast('No reference PDF — session owner can attach one from File menu', 'info');
+            return;
+        }
+        state.pdfSplitVisible = typeof force === 'boolean' ? force : !state.pdfSplitVisible;
+        updateReferencePdfUI();
+    }
+
+    async function setDefaultJoinRole(role) {
+        if (!state.currentSession || !userCanManageSessionSettings()) return;
+        const r = role === 'viewer' ? 'viewer' : 'editor';
+        state.defaultJoinRole = r;
+        updateJoinPolicyUI();
+        try {
+            if (state.socket && state.socket.connected) {
+                state.socket.emit('set-join-policy', {
+                    sessionId: state.currentSession,
+                    defaultJoinRole: r
+                });
+            } else {
+                await api(`/sessions/${state.currentSession}/join-policy`, {
+                    method: 'PUT',
+                    body: JSON.stringify({ defaultJoinRole: r })
+                });
+            }
+            showToast(`New guests will join as ${r}`, 'success');
+        } catch (err) {
+            showToast(err.message || 'Failed to update join policy', 'error');
+        }
+    }
+
+    async function uploadSessionPdf(file) {
+        if (!state.currentSession || !file) return;
+        if (!userCanManageSessionSettings()) {
+            showToast('Only the session owner or site admin can attach a PDF', 'error');
+            return;
+        }
+        const fd = new FormData();
+        fd.append('pdf', file);
+        const headers = {};
+        if (state.token) headers.Authorization = `Bearer ${state.token}`;
+        const res = await fetch(`${API_BASE}/sessions/${state.currentSession}/pdf`, {
+            method: 'POST',
+            headers,
+            body: fd
+        });
+        const raw = await res.text();
+        let data = {};
+        try { data = raw ? JSON.parse(raw) : {}; } catch (_) { /* ignore */ }
+        if (!res.ok) throw new Error((data && data.error) || `Upload failed (${res.status})`);
+        state.referencePdf = data.referencePdf || null;
+        state.pdfSplitVisible = true;
+        updateReferencePdfUI();
+        if (state.socket && state.socket.connected) {
+            state.socket.emit('session-pdf-updated', {
+                sessionId: state.currentSession,
+                referencePdf: state.referencePdf
+            });
+        }
+        showToast('Reference PDF attached', 'success');
+    }
+
+    async function removeSessionPdf() {
+        if (!state.currentSession) return;
+        if (!userCanManageSessionSettings()) {
+            showToast('Only the session owner or site admin can remove the PDF', 'error');
+            return;
+        }
+        try {
+            await api(`/sessions/${state.currentSession}/pdf`, { method: 'DELETE' });
+            state.referencePdf = null;
+            state.pdfSplitVisible = false;
+            updateReferencePdfUI();
+            if (state.socket && state.socket.connected) {
+                state.socket.emit('session-pdf-updated', {
+                    sessionId: state.currentSession,
+                    referencePdf: null
+                });
+            }
+            showToast('Reference PDF removed', 'success');
+        } catch (err) {
+            showToast(err.message || 'Failed to remove PDF', 'error');
+        }
+    }
+
+    function updateStdinHintForCode(code) {
+        const hint = document.getElementById('run-stdin-hint');
+        const input = document.getElementById('run-stdin-input');
+        const needs = codeNeedsStdin(code);
+        if (hint) hint.style.display = needs ? '' : 'none';
+        if (input) input.classList.toggle('stdin-needed', needs && !input.value.trim());
+    }
+
+    function ensureRunPanelVisible() {
+        const unifiedPanel = document.getElementById('unified-panel');
+        const outputPanelContent = document.getElementById('output-panel-content');
+        const previewContent = document.getElementById('preview-panel-content');
+        if (unifiedPanel) unifiedPanel.style.display = '';
+        if (outputPanelContent) outputPanelContent.style.display = '';
+        if (previewContent) previewContent.style.display = 'none';
+        document.querySelectorAll('#panel-tabs .vscode-panel-tab').forEach((t) => t.classList.remove('active'));
+        const outputTab = document.querySelector('#panel-tabs .vscode-panel-tab[data-panel-tab="output"]');
+        if (outputTab) outputTab.classList.add('active');
+    }
+
+    let tabDragFileId = null;
+
+    function initTabDragReorder() {
+        const tabsContainer = document.getElementById('editor-tabs');
+        if (!tabsContainer || tabsContainer.dataset.tabDragBound) return;
+        tabsContainer.dataset.tabDragBound = '1';
+
+        tabsContainer.addEventListener('dragstart', (e) => {
+            const tab = e.target.closest('.editor-tab');
+            if (!tab || !tab.dataset.fileId) return;
+            tabDragFileId = tab.dataset.fileId;
+            tab.classList.add('tab-dragging');
+            e.dataTransfer.effectAllowed = 'move';
+            e.dataTransfer.setData('text/plain', tabDragFileId);
+        });
+
+        tabsContainer.addEventListener('dragend', (e) => {
+            const tab = e.target.closest('.editor-tab');
+            if (tab) tab.classList.remove('tab-dragging');
+            tabsContainer.querySelectorAll('.editor-tab').forEach((t) => t.classList.remove('tab-drag-over'));
+            tabDragFileId = null;
+        });
+
+        tabsContainer.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            const tab = e.target.closest('.editor-tab');
+            if (!tab || !tab.dataset.fileId) return;
+            tabsContainer.querySelectorAll('.editor-tab').forEach((t) => t.classList.remove('tab-drag-over'));
+            tab.classList.add('tab-drag-over');
+        });
+
+        tabsContainer.addEventListener('drop', (e) => {
+            e.preventDefault();
+            const tab = e.target.closest('.editor-tab');
+            if (!tab || !tabDragFileId) return;
+            const targetId = tab.dataset.fileId;
+            if (targetId === tabDragFileId) return;
+            syncTabOrder();
+            const from = state.tabOrder.indexOf(tabDragFileId);
+            const to = state.tabOrder.indexOf(targetId);
+            if (from < 0 || to < 0) return;
+            state.tabOrder.splice(from, 1);
+            state.tabOrder.splice(to, 0, tabDragFileId);
+            renderTabs();
+        });
+    }
+
+    function initEditorDragDrop() {
+        const main = document.getElementById('editor-main');
+        const overlay = document.getElementById('editor-drop-overlay');
+        if (!main || main.dataset.dropBound) return;
+        main.dataset.dropBound = '1';
+        let depth = 0;
+
+        const showOverlay = () => {
+            if (overlay) {
+                overlay.style.display = '';
+                overlay.setAttribute('aria-hidden', 'false');
+            }
+        };
+        const hideOverlay = () => {
+            if (overlay) {
+                overlay.style.display = 'none';
+                overlay.setAttribute('aria-hidden', 'true');
+            }
+        };
+
+        main.addEventListener('dragenter', (e) => {
+            if (!state.currentSession || state.currentView !== 'editor') return;
+            if (!userCanEditSession()) return;
+            if (!e.dataTransfer || !Array.from(e.dataTransfer.types || []).includes('Files')) return;
+            e.preventDefault();
+            depth += 1;
+            showOverlay();
+        });
+
+        main.addEventListener('dragleave', (e) => {
+            if (!overlay || overlay.style.display === 'none') return;
+            if (e.relatedTarget && main.contains(e.relatedTarget)) return;
+            depth = Math.max(0, depth - 1);
+            if (depth === 0) hideOverlay();
+        });
+
+        main.addEventListener('dragover', (e) => {
+            if (!state.currentSession || !userCanEditSession()) return;
+            if (e.dataTransfer && Array.from(e.dataTransfer.types || []).includes('Files')) {
+                e.preventDefault();
+                e.dataTransfer.dropEffect = 'copy';
+            }
+        });
+
+        main.addEventListener('drop', async (e) => {
+            depth = 0;
+            hideOverlay();
+            if (!state.currentSession || !userCanEditSession()) return;
+            const files = e.dataTransfer && e.dataTransfer.files;
+            if (!files || !files.length) return;
+            e.preventDefault();
+            await importLocalFolder(files);
+        });
+    }
+
     const LOCAL_IMPORT_EXT = new Set([
         '.js', '.mjs', '.cjs', '.ts', '.tsx', '.jsx', '.html', '.htm', '.css', '.scss', '.less',
         '.json', '.md', '.markdown', '.txt', '.py', '.java', '.cpp', '.cc', '.cxx', '.c', '.h', '.hpp',
@@ -648,6 +947,7 @@
         try {
             sessionStorage.setItem(`codemesh_stdin_${state.currentSession}`, getRunStdin());
         } catch (_) { /* quota */ }
+        if (state.editorView) updateStdinHintForCode(state.editorView.getValue());
     }
 
     function restoreRunStdin() {
@@ -673,9 +973,6 @@
 
         const payload = [];
         let totalBytes = 0;
-        const MAX_FILES = 45;
-        const MAX_FILE_BYTES = 256 * 1024;
-        const MAX_TOTAL = 2 * 1024 * 1024;
 
         picked.sort((a, b) => {
             const pa = (a.webkitRelativePath || a.name).localeCompare(b.webkitRelativePath || b.name);
@@ -683,23 +980,23 @@
         });
 
         for (const file of picked) {
-            if (payload.length >= MAX_FILES) break;
+            if (payload.length >= IMPORT_MAX_FILES) break;
             const rel = (file.webkitRelativePath || file.name).replace(/\\/g, '/');
             if (!localImportPathOk(rel)) continue;
-            if (file.size > MAX_FILE_BYTES) continue;
-            if (totalBytes + file.size > MAX_TOTAL) break;
+            if (file.size > IMPORT_MAX_FILE_BYTES) continue;
+            if (totalBytes + file.size > IMPORT_MAX_TOTAL_BYTES) break;
             try {
                 const content = await readFileAsText(file);
                 const bytes = new Blob([content]).size;
-                if (bytes > MAX_FILE_BYTES) continue;
-                if (totalBytes + bytes > MAX_TOTAL) break;
+                if (bytes > IMPORT_MAX_FILE_BYTES) continue;
+                if (totalBytes + bytes > IMPORT_MAX_TOTAL_BYTES) break;
                 totalBytes += bytes;
                 payload.push({ name: rel, content });
             } catch (_) { /* skip unreadable */ }
         }
 
         if (!payload.length) {
-            showToast('No suitable text files in that folder (size/type limits apply)', 'error');
+            showToast('No suitable text files (max 120 files, 5MB each, 50MB total)', 'error');
             return;
         }
 
@@ -1233,6 +1530,7 @@
         editor.onDidChangeModelContent((e) => {
             if (state.isApplyingRemote) return;
             handleLocalChange(e);
+            updateStdinHintForCode(editor.getValue());
         });
 
         editor.onDidChangeCursorSelection((e) => {
@@ -1245,6 +1543,7 @@
             }
         });
 
+        updateStdinHintForCode(doc);
         return editor;
     }
 
@@ -1498,9 +1797,17 @@
                 state.editorView.dispose();
             }
 
+            applySessionMeta({
+                defaultJoinRole: sessionData.defaultJoinRole,
+                referencePdf: normalizeReferencePdf(sessionData),
+                owner: sessionData.owner
+            });
+
             // Connect WebSocket
             connectSocket(sessionId, sessionData);
             restoreRunStdin();
+            initEditorDragDrop();
+            initTabDragReorder();
 
         } catch (err) {
             setDocumentTitle(DEFAULT_DOC_TITLE);
@@ -1534,6 +1841,10 @@
             // Set user role
             state.userRole = data.role || 'editor';
             updateRoleBadge(state.userRole);
+            applySessionMeta({
+                defaultJoinRole: data.defaultJoinRole,
+                referencePdf: data.referencePdf
+            });
 
             if (data.comments) {
                 state.comments = data.comments;
@@ -1652,6 +1963,18 @@
         state.socket.on('session-files-reloaded', (data) => {
             applyReloadedSessionFiles(data.files);
             showToast('Workspace files updated', 'info');
+        });
+
+        state.socket.on('join-policy-changed', (data) => {
+            if (!data) return;
+            state.defaultJoinRole = data.defaultJoinRole === 'viewer' ? 'viewer' : 'editor';
+            updateJoinPolicyUI();
+        });
+
+        state.socket.on('reference-pdf-changed', (data) => {
+            state.referencePdf = data && data.referencePdf ? data.referencePdf : null;
+            if (!state.referencePdf) state.pdfSplitVisible = false;
+            updateReferencePdfUI();
         });
 
         state.socket.on('comment-added', (comment) => {
@@ -2006,8 +2329,10 @@
         const tabsContainer = document.getElementById('editor-tabs');
         if (!tabsContainer) return;
 
+        syncTabOrder();
         let html = '';
-        state.openTabs.forEach(id => {
+        state.tabOrder.forEach(id => {
+            if (!state.openTabs.has(id)) return;
             const file = state.files.get(id);
             if (!file) {
                 state.openTabs.delete(id);
@@ -2028,7 +2353,7 @@
             const isActive = id === state.activeFileId ? 'active' : '';
             const tabLabel = fileBasename(file.name);
             html += `
-                <div class="editor-tab ${isActive}" data-file-id="${id}" onclick="openFile('${id}')">
+                <div class="editor-tab ${isActive}" draggable="true" data-file-id="${id}" onclick="openFile('${id}')">
                     <i class="codicon ${iconClass} tab-icon" style="color: ${iconColor}; margin-right: 6px;"></i>
                     <span class="tab-title" title="${escapeHtml(file.name)}">${escapeHtml(tabLabel)}</span>
                     <button class="btn btn-icon btn-xs tab-close" onclick="event.stopPropagation(); closeTab('${id}')" style="background:none;border:none;color:inherit;cursor:pointer;">
@@ -2046,6 +2371,7 @@
         
         state.activeFileId = fileId;
         state.openTabs.add(fileId);
+        syncTabOrder();
         
         const file = state.files.get(fileId);
         
@@ -2076,6 +2402,7 @@
             tryAutoRenameForInferredLang(file, file.doc);
         }
 
+        updateStdinHintForCode(file.doc);
         renderFileTree();
         renderTabs();
         updateRemoteSelections();
@@ -2083,6 +2410,7 @@
 
     window.closeTab = function(fileId) {
         state.openTabs.delete(fileId);
+        state.tabOrder = state.tabOrder.filter((id) => id !== fileId);
         
         if (state.activeFileId === fileId) {
             if (state.openTabs.size > 0) {
@@ -2509,6 +2837,25 @@
             e.target.value = '';
             if (list && list.length) await importLocalFolder(list);
         });
+        document.getElementById('import-files-input')?.addEventListener('change', async (e) => {
+            const list = e.target.files;
+            e.target.value = '';
+            if (list && list.length) await importLocalFolder(list);
+        });
+        document.getElementById('session-pdf-input')?.addEventListener('change', async (e) => {
+            const file = e.target.files && e.target.files[0];
+            e.target.value = '';
+            if (!file) return;
+            try {
+                await uploadSessionPdf(file);
+            } catch (err) {
+                showToast(err.message || 'PDF upload failed', 'error');
+            }
+        });
+        document.getElementById('join-policy-select')?.addEventListener('change', (e) => {
+            setDefaultJoinRole(e.target.value);
+        });
+        document.getElementById('pdf-split-close')?.addEventListener('click', () => togglePdfSplit(false));
 
         document.getElementById('clear-output-btn')?.addEventListener('click', () => {
             document.getElementById('output-content').innerHTML = '';
@@ -2550,6 +2897,15 @@
                     document.getElementById('import-folder-input')?.click();
                 }
                 else if (action === 'import-github') importGitHubIntoCurrentSession();
+                else if (action === 'attach-pdf') {
+                    if (!userCanManageSessionSettings()) {
+                        showToast('Only the session owner or site admin can attach a PDF', 'error');
+                        return;
+                    }
+                    document.getElementById('session-pdf-input')?.click();
+                }
+                else if (action === 'remove-pdf') removeSessionPdf();
+                else if (action === 'toggle-pdf-split') togglePdfSplit();
                 else if (action === 'save') manualSave();
                 else if (action === 'undo' && state.editorView) state.editorView.trigger('keyboard', 'undo', null);
                 else if (action === 'redo' && state.editorView) state.editorView.trigger('keyboard', 'redo', null);
@@ -2725,6 +3081,9 @@
                 document.getElementById('submit-comment-btn').click();
             }
         });
+
+        initEditorDragDrop();
+        initTabDragReorder();
     }
 
     // ─── Code Execution ───
@@ -2768,16 +3127,15 @@
             return;
         }
 
+        updateStdinHintForCode(code);
+        ensureRunPanelVisible();
+        if (codeNeedsStdin(code) && !getRunStdin().trim()) {
+            showToast('This program reads stdin (cin, scanf, input…). Add input in the OUTPUT panel below, then Run again.', 'info');
+            document.getElementById('run-stdin-input')?.focus();
+        }
+
         const outputContent = document.getElementById('output-content');
         const execTimeEl = document.getElementById('exec-time');
-
-        // Show unified panel with output tab
-        if (unifiedPanel) unifiedPanel.style.display = '';
-        if (outputPanelContent) outputPanelContent.style.display = '';
-        if (previewContent) previewContent.style.display = 'none';
-        document.querySelectorAll('#panel-tabs .vscode-panel-tab').forEach(t => t.classList.remove('active'));
-        const outputTab = document.querySelector('#panel-tabs .vscode-panel-tab[data-panel-tab="output"]');
-        if (outputTab) outputTab.classList.add('active');
         runBtn.classList.add('running');
         const runBtnSpan = runBtn.querySelector('span');
         if (runBtnSpan) runBtnSpan.textContent = 'Running...';

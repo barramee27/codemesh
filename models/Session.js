@@ -63,6 +63,18 @@ const sessionSchema = new mongoose.Schema({
         type: Boolean,
         default: true
     },
+    /** Role assigned to new collaborators when they first join (owner chooses editor or viewer). */
+    defaultJoinRole: {
+        type: String,
+        enum: ['editor', 'viewer'],
+        default: 'editor'
+    },
+    /** Optional reference PDF for split view (owner or site admin). */
+    referencePdf: {
+        storageName: { type: String },
+        originalName: { type: String },
+        uploadedAt: { type: Date }
+    },
     createdAt: {
         type: Date,
         default: Date.now

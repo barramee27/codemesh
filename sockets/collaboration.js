@@ -234,9 +234,10 @@ module.exports = function setupCollaboration(io) {
                     }
                     // Also add as collaborator if not already
                     if (!collab) {
-                        dbSession.collaborators.push({ user: userId, role: 'viewer' });
+                        const joinRole = dbSession.defaultJoinRole === 'viewer' ? 'viewer' : 'editor';
+                        dbSession.collaborators.push({ user: userId, role: joinRole });
                         await dbSession.save();
-                        userRole = 'viewer';
+                        userRole = joinRole;
                     }
                 }
             }
@@ -264,13 +265,32 @@ module.exports = function setupCollaboration(io) {
                 };
             });
 
+            let defaultJoinRole = 'editor';
+            let referencePdf = null;
+            if (!dbSession) {
+                try {
+                    dbSession = await Session.findOne({ sessionId });
+                } catch (err) { /* ignore */ }
+            }
+            if (dbSession) {
+                defaultJoinRole = dbSession.defaultJoinRole === 'viewer' ? 'viewer' : 'editor';
+                if (dbSession.referencePdf && dbSession.referencePdf.storageName) {
+                    referencePdf = {
+                        url: `/uploads/${dbSession.referencePdf.storageName}`,
+                        originalName: dbSession.referencePdf.originalName || 'reference.pdf'
+                    };
+                }
+            }
+
             // Send current state to joining client
             socket.emit('session-state', {
                 files: clientFiles,
                 users: Object.fromEntries(state.users),
                 role: userRole,
                 comments: state.comments,
-                chatMessages: state.chatMessages || []
+                chatMessages: state.chatMessages || [],
+                defaultJoinRole,
+                referencePdf
             });
 
             // Notify others
@@ -604,7 +624,35 @@ module.exports = function setupCollaboration(io) {
             io.to(sessionId).emit('chat-message', msg);
         });
 
-        socket.on('request-state', (data) => {
+        socket.on('session-pdf-updated', (data) => {
+            const { sessionId, referencePdf } = data || {};
+            if (!sessionId) return;
+            const mem = activeSessions.get(sessionId);
+            if (!mem) return;
+            const requester = mem.users.get(socket.id);
+            if (!requester || (requester.role !== 'owner' && requester.role !== 'admin')) return;
+            io.to(sessionId).emit('reference-pdf-changed', { referencePdf: referencePdf || null });
+        });
+
+        socket.on('set-join-policy', async (data) => {
+            const { sessionId, defaultJoinRole } = data;
+            if (!sessionId || !['editor', 'viewer'].includes(defaultJoinRole)) return;
+            const mem = activeSessions.get(sessionId);
+            if (!mem) return;
+            const requester = mem.users.get(socket.id);
+            if (!requester || (requester.role !== 'owner' && requester.role !== 'admin')) return;
+            try {
+                const dbSession = await Session.findOne({ sessionId });
+                if (!dbSession) return;
+                dbSession.defaultJoinRole = defaultJoinRole;
+                await dbSession.save();
+                io.to(sessionId).emit('join-policy-changed', { defaultJoinRole });
+            } catch (err) {
+                console.error('set-join-policy:', err.message);
+            }
+        });
+
+        socket.on('request-state', async (data) => {
             const { sessionId } = data;
             if (!sessionId || socket.sessionId !== sessionId) return;
             const state = activeSessions.get(sessionId);
@@ -621,12 +669,28 @@ module.exports = function setupCollaboration(io) {
                     version: fileData.version
                 };
             });
+            let defaultJoinRole = 'editor';
+            let referencePdf = null;
+            try {
+                const dbSession = await Session.findOne({ sessionId });
+                if (dbSession) {
+                    defaultJoinRole = dbSession.defaultJoinRole === 'viewer' ? 'viewer' : 'editor';
+                    if (dbSession.referencePdf && dbSession.referencePdf.storageName) {
+                        referencePdf = {
+                            url: `/uploads/${dbSession.referencePdf.storageName}`,
+                            originalName: dbSession.referencePdf.originalName || 'reference.pdf'
+                        };
+                    }
+                }
+            } catch (err) { /* ignore */ }
             socket.emit('session-state', {
                 files: clientFiles,
                 users: Object.fromEntries(state.users),
                 role: userInfo.role,
                 comments: state.comments,
-                chatMessages: state.chatMessages || []
+                chatMessages: state.chatMessages || [],
+                defaultJoinRole,
+                referencePdf
             });
         });
 

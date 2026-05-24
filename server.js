@@ -43,7 +43,7 @@ const allowedOrigins = process.env.ALLOWED_ORIGINS
     ? process.env.ALLOWED_ORIGINS.split(',').map(o => o.trim()).filter(Boolean)
     : '*';
 app.use(cors({ origin: allowedOrigins }));
-app.use(express.json({ limit: '10mb' }));
+app.use(express.json({ limit: '52mb' }));
 
 // index.html + app.js: no-cache so deploys are visible immediately (avoids blank/stale admin panels)
 app.get(['/', '/index.html'], (req, res) => {

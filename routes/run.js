@@ -12,14 +12,17 @@ router.post('/', authMiddleware, async (req, res) => {
         return res.status(400).json({ error: 'Code and language are required' });
     }
 
-    const stdinText = stdin != null ? String(stdin) : '';
-    const stdinCapped = stdinText.length > 100000 ? stdinText.slice(0, 100000) : stdinText;
+    let stdinText = stdin != null ? String(stdin) : '';
+    if (stdinText.length > 100000) stdinText = stdinText.slice(0, 100000);
+    if (stdinText.length && !stdinText.endsWith('\n')) {
+        stdinText += '\n';
+    }
 
     try {
         const r = await executeCodeWithStdin({
             code,
             language,
-            stdin: stdinCapped,
+            stdin: stdinText,
             timeLimitMs: DEFAULT_TIMEOUT_MS
         });
 

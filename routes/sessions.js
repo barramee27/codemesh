@@ -1,4 +1,7 @@
 const express = require('express');
+const path = require('path');
+const fs = require('fs');
+const multer = require('multer');
 const jwt = require('jsonwebtoken');
 const { v4: uuidv4 } = require('uuid');
 const Session = require('../models/Session');
@@ -6,6 +9,27 @@ const User = require('../models/User');
 const authMiddleware = require('../middleware/auth');
 const { fetchPublicRepoFiles, languageFromFilename, textLikeFile, shouldSkipPath } = require('../utils/githubImport');
 const { MAX_FILES, MAX_FILE_BYTES, MAX_TOTAL_BYTES } = require('../utils/sessionImportLimits');
+
+const UPLOADS_DIR = path.join(__dirname, '..', 'uploads');
+if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+
+const pdfUpload = multer({
+    storage: multer.diskStorage({
+        destination: (req, file, cb) => cb(null, UPLOADS_DIR),
+        filename: (req, file, cb) => {
+            const sid = path.basename(req.params.id || 'session');
+            cb(null, `session-${sid}-ref-${Date.now()}.pdf`);
+        }
+    }),
+    limits: { fileSize: 20 * 1024 * 1024 },
+    fileFilter: (req, file, cb) => {
+        if (file.mimetype === 'application/pdf' || /\.pdf$/i.test(file.originalname)) {
+            cb(null, true);
+        } else {
+            cb(new Error('Only PDF files are allowed'));
+        }
+    }
+});
 
 const JWT_SECRET = process.env.JWT_SECRET || 'fallback_secret';
 
@@ -18,6 +42,24 @@ function sessionCanEdit(session, userId, isAdmin) {
     if (session.owner.toString() === userId) return true;
     const collab = session.collaborators.find((c) => c.user.toString() === userId);
     return !!(collab && collab.role === 'editor');
+}
+
+function sessionIsOwnerOrSiteAdmin(session, userId, isAdmin) {
+    return isAdmin || session.owner.toString() === userId;
+}
+
+function referencePdfPayload(session) {
+    if (!session.referencePdf || !session.referencePdf.storageName) return null;
+    return {
+        url: `/uploads/${session.referencePdf.storageName}`,
+        originalName: session.referencePdf.originalName || 'reference.pdf'
+    };
+}
+
+function attachSessionMeta(session) {
+    const obj = session.toObject ? session.toObject() : { ...session };
+    obj.referencePdf = referencePdfPayload(session);
+    return obj;
 }
 
 function normalizeImportPath(name) {
@@ -230,7 +272,7 @@ router.post('/:id/import-files', authMiddleware, async (req, res) => {
         const imported = normalizeImportedFileList(req.body.files);
         if (!imported.length) {
             return res.status(400).json({
-                error: 'No suitable text files (check size/type limits: max 45 files, 256KB each, 2MB total)'
+                error: 'No suitable text files (limits: 120 files, 5MB each, 50MB total)'
             });
         }
 
@@ -323,6 +365,88 @@ router.put('/:id', authMiddleware, async (req, res) => {
     } catch (err) {
         console.error('Update session error:', err);
         res.status(500).json({ error: 'Failed to update session' });
+    }
+});
+
+// PUT /api/sessions/:id/join-policy — default role for new guests (owner or site admin)
+router.put('/:id/join-policy', authMiddleware, async (req, res) => {
+    try {
+        const role = String(req.body.defaultJoinRole || '').toLowerCase();
+        if (!['editor', 'viewer'].includes(role)) {
+            return res.status(400).json({ error: 'defaultJoinRole must be editor or viewer' });
+        }
+        const session = await Session.findOne({ sessionId: req.params.id });
+        if (!session) return res.status(404).json({ error: 'Session not found' });
+        if (!sessionIsOwnerOrSiteAdmin(session, req.user.id, req.user.role === 'admin')) {
+            return res.status(403).json({ error: 'Only the session owner or site admin can change join policy' });
+        }
+        session.defaultJoinRole = role;
+        session.updatedAt = Date.now();
+        await session.save();
+        res.json({
+            message: `New guests will join as ${role}`,
+            defaultJoinRole: role,
+            session: attachSessionMeta(session)
+        });
+    } catch (err) {
+        console.error('join-policy error:', err);
+        res.status(500).json({ error: 'Failed to update join policy' });
+    }
+});
+
+// POST /api/sessions/:id/pdf — attach reference PDF for split view
+router.post('/:id/pdf', authMiddleware, pdfUpload.single('pdf'), async (req, res) => {
+    try {
+        if (!req.file) return res.status(400).json({ error: 'No PDF uploaded' });
+        const session = await Session.findOne({ sessionId: req.params.id });
+        if (!session) {
+            fs.unlink(req.file.path, () => {});
+            return res.status(404).json({ error: 'Session not found' });
+        }
+        if (!sessionIsOwnerOrSiteAdmin(session, req.user.id, req.user.role === 'admin')) {
+            fs.unlink(req.file.path, () => {});
+            return res.status(403).json({ error: 'Only the session owner or site admin can attach a PDF' });
+        }
+        if (session.referencePdf && session.referencePdf.storageName) {
+            const oldPath = path.join(UPLOADS_DIR, session.referencePdf.storageName);
+            if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
+        }
+        session.referencePdf = {
+            storageName: req.file.filename,
+            originalName: req.file.originalname,
+            uploadedAt: new Date()
+        };
+        session.updatedAt = Date.now();
+        await session.save();
+        res.json({
+            message: 'PDF attached for split view',
+            referencePdf: referencePdfPayload(session)
+        });
+    } catch (err) {
+        console.error('session pdf upload:', err);
+        res.status(500).json({ error: err.message || 'Failed to upload PDF' });
+    }
+});
+
+// DELETE /api/sessions/:id/pdf
+router.delete('/:id/pdf', authMiddleware, async (req, res) => {
+    try {
+        const session = await Session.findOne({ sessionId: req.params.id });
+        if (!session) return res.status(404).json({ error: 'Session not found' });
+        if (!sessionIsOwnerOrSiteAdmin(session, req.user.id, req.user.role === 'admin')) {
+            return res.status(403).json({ error: 'Only the session owner or site admin can remove the PDF' });
+        }
+        if (session.referencePdf && session.referencePdf.storageName) {
+            const p = path.join(UPLOADS_DIR, session.referencePdf.storageName);
+            if (fs.existsSync(p)) fs.unlinkSync(p);
+        }
+        session.referencePdf = undefined;
+        session.updatedAt = Date.now();
+        await session.save();
+        res.json({ message: 'PDF removed', referencePdf: null });
+    } catch (err) {
+        console.error('session pdf delete:', err);
+        res.status(500).json({ error: 'Failed to remove PDF' });
     }
 });
 

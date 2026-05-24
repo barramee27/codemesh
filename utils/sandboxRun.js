@@ -28,7 +28,7 @@ const RUNNERS = {
     },
     cpp: {
         ext: '.cpp',
-        compile: (file, out) => ['g++', ['-o', out, file, '-std=c++17']],
+        compile: (file, out) => ['g++', ['-o', out, file, '-std=gnu++17']],
         cmd: (file, out) => [out, []]
     },
     java: {
