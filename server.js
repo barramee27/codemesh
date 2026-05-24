@@ -35,6 +35,7 @@ const io = new Server(server, {
     pingTimeout: 5000,     // Disconnect if no pong in 5s (was 20s default)
     connectTimeout: 10000  // 10s to complete handshake
 });
+app.set('io', io);
 
 // ─── Middleware ───
 app.set('trust proxy', 1);  // Required for rate limit behind Railway/nginx

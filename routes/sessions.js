@@ -62,6 +62,15 @@ function attachSessionMeta(session) {
     return obj;
 }
 
+function broadcastReferencePdf(req, sessionId, referencePdf) {
+    const io = req.app && req.app.get('io');
+    if (!io || !sessionId) return;
+    io.to(sessionId).emit('reference-pdf-changed', {
+        referencePdf: referencePdf || null,
+        pdfSplitVisible: !!referencePdf
+    });
+}
+
 function normalizeImportPath(name) {
     const n = String(name || '').replace(/\\/g, '/').replace(/^\/+/, '');
     if (!n || n.includes('..')) return null;
@@ -418,9 +427,11 @@ router.post('/:id/pdf', authMiddleware, pdfUpload.single('pdf'), async (req, res
         };
         session.updatedAt = Date.now();
         await session.save();
+        const referencePdf = referencePdfPayload(session);
+        broadcastReferencePdf(req, session.sessionId, referencePdf);
         res.json({
             message: 'PDF attached for split view',
-            referencePdf: referencePdfPayload(session)
+            referencePdf
         });
     } catch (err) {
         console.error('session pdf upload:', err);
@@ -443,6 +454,7 @@ router.delete('/:id/pdf', authMiddleware, async (req, res) => {
         session.referencePdf = undefined;
         session.updatedAt = Date.now();
         await session.save();
+        broadcastReferencePdf(req, session.sessionId, null);
         res.json({ message: 'PDF removed', referencePdf: null });
     } catch (err) {
         console.error('session pdf delete:', err);

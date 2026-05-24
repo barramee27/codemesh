@@ -835,12 +835,24 @@
         });
     }
 
-    function initEditorDragDrop() {
-        const main = document.getElementById('editor-main');
-        const overlay = document.getElementById('editor-drop-overlay');
-        if (!main || main.dataset.dropBound) return;
-        main.dataset.dropBound = '1';
+    function isFileDragEvent(e) {
+        if (!e.dataTransfer) return false;
+        const types = Array.from(e.dataTransfer.types || []);
+        return types.includes('Files');
+    }
+
+    function initWorkspaceDragDrop() {
+        const root = document.getElementById('editor-view');
+        const body = document.getElementById('vscode-body');
+        const overlay = document.getElementById('workspace-drop-overlay');
+        if (!root || root.dataset.workspaceDropBound) return;
+        root.dataset.workspaceDropBound = '1';
         let depth = 0;
+
+        const canImport = () =>
+            state.currentView === 'editor'
+            && state.currentSession
+            && userCanEditSession();
 
         const showOverlay = () => {
             if (overlay) {
@@ -855,39 +867,53 @@
             }
         };
 
-        main.addEventListener('dragenter', (e) => {
-            if (!state.currentSession || state.currentView !== 'editor') return;
-            if (!userCanEditSession()) return;
-            if (!e.dataTransfer || !Array.from(e.dataTransfer.types || []).includes('Files')) return;
+        const onDragEnter = (e) => {
+            if (!canImport() || !isFileDragEvent(e)) return;
             e.preventDefault();
+            e.stopPropagation();
             depth += 1;
             showOverlay();
-        });
+        };
 
-        main.addEventListener('dragleave', (e) => {
+        const onDragLeave = (e) => {
             if (!overlay || overlay.style.display === 'none') return;
-            if (e.relatedTarget && main.contains(e.relatedTarget)) return;
+            if (e.relatedTarget && body && body.contains(e.relatedTarget)) return;
             depth = Math.max(0, depth - 1);
             if (depth === 0) hideOverlay();
-        });
+        };
 
-        main.addEventListener('dragover', (e) => {
-            if (!state.currentSession || !userCanEditSession()) return;
-            if (e.dataTransfer && Array.from(e.dataTransfer.types || []).includes('Files')) {
-                e.preventDefault();
+        const onDragOver = (e) => {
+            if (!state.currentView || state.currentView !== 'editor') return;
+            if (!isFileDragEvent(e)) return;
+            e.preventDefault();
+            e.stopPropagation();
+            if (canImport()) {
                 e.dataTransfer.dropEffect = 'copy';
+            } else {
+                e.dataTransfer.dropEffect = 'none';
             }
-        });
+        };
 
-        main.addEventListener('drop', async (e) => {
+        const onDrop = async (e) => {
+            if (!isFileDragEvent(e)) return;
+            e.preventDefault();
+            e.stopPropagation();
             depth = 0;
             hideOverlay();
-            if (!state.currentSession || !userCanEditSession()) return;
+            if (!canImport()) {
+                showToast('Viewers cannot import files. Ask the owner for editor access.', 'error');
+                return;
+            }
             const files = e.dataTransfer && e.dataTransfer.files;
             if (!files || !files.length) return;
-            e.preventDefault();
             await importLocalFolder(files);
-        });
+        };
+
+        // Capture phase so drops on sidebar/workspace win over the browser opening a new tab
+        root.addEventListener('dragenter', onDragEnter, true);
+        root.addEventListener('dragleave', onDragLeave, true);
+        root.addEventListener('dragover', onDragOver, true);
+        root.addEventListener('drop', onDrop, true);
     }
 
     const LOCAL_IMPORT_EXT = new Set([
@@ -1857,7 +1883,7 @@
             // Connect WebSocket
             connectSocket(sessionId, sessionData);
             restoreRunStdin();
-            initEditorDragDrop();
+            initWorkspaceDragDrop();
             initTabDragReorder();
 
         } catch (err) {
@@ -2024,8 +2050,17 @@
         });
 
         state.socket.on('reference-pdf-changed', (data) => {
-            state.referencePdf = data && data.referencePdf ? data.referencePdf : null;
-            if (!state.referencePdf) state.pdfSplitVisible = false;
+            if (!data) return;
+            state.referencePdf = data.referencePdf
+                ? normalizeReferencePdf({ referencePdf: data.referencePdf })
+                : null;
+            if (data.pdfSplitVisible != null) {
+                state.pdfSplitVisible = !!data.pdfSplitVisible;
+            } else if (state.referencePdf) {
+                state.pdfSplitVisible = true;
+            } else {
+                state.pdfSplitVisible = false;
+            }
             updateReferencePdfUI();
         });
 
@@ -3135,7 +3170,7 @@
             }
         });
 
-        initEditorDragDrop();
+        initWorkspaceDragDrop();
         initTabDragReorder();
 
         if (!window.__codemeshEditorResizeBound) {

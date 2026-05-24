@@ -632,12 +632,11 @@ module.exports = function setupCollaboration(io) {
 
         socket.on('session-pdf-updated', (data) => {
             const { sessionId, referencePdf } = data || {};
-            if (!sessionId) return;
-            const mem = activeSessions.get(sessionId);
-            if (!mem) return;
-            const requester = mem.users.get(socket.id);
-            if (!requester || (requester.role !== 'owner' && requester.role !== 'admin')) return;
-            io.to(sessionId).emit('reference-pdf-changed', { referencePdf: referencePdf || null });
+            if (!sessionId || socket.sessionId !== sessionId) return;
+            io.to(sessionId).emit('reference-pdf-changed', {
+                referencePdf: referencePdf || null,
+                pdfSplitVisible: !!referencePdf
+            });
         });
 
         socket.on('set-join-policy', async (data) => {

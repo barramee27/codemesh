@@ -1339,6 +1339,25 @@ select.input-full {
   display: flex;
   flex: 1;
   min-height: 0;
+  position: relative;
+}
+
+.workspace-drop-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(108, 92, 231, 0.14);
+  border: 2px dashed var(--vscode-focus-border, #6c5ce7);
+  pointer-events: none;
+}
+
+.workspace-drop-overlay p {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--vscode-foreground);
 }
 
 /* Activity Bar */
