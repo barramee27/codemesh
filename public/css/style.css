@@ -1817,6 +1817,73 @@ select.input-full {
   align-items: center;
 }
 
+.output-panel-stack {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+}
+
+.run-stdin-label {
+  display: block;
+  flex-shrink: 0;
+  padding: 6px 12px 2px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--vscode-panel-title-inactive-fg);
+}
+
+.run-stdin-input {
+  flex-shrink: 0;
+  margin: 0 10px 8px;
+  padding: 8px 10px;
+  min-height: 64px;
+  max-height: 140px;
+  resize: vertical;
+  border-radius: 4px;
+  border: 1px solid var(--vscode-border);
+  background: var(--vscode-input-bg);
+  color: var(--vscode-input-fg);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.run-stdin-input:focus {
+  border-color: var(--vscode-focus-border);
+  outline: none;
+}
+
+.output-panel-stack .output-content {
+  flex: 1;
+  min-height: 80px;
+  margin: 0;
+  padding: 8px 12px;
+  overflow: auto;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.viewer-overlay {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 5;
+  padding: 4px 10px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #e2e8f0;
+  background: rgba(30, 41, 59, 0.92);
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  pointer-events: none;
+}
+
 /* Additional VS Code UI enhancements */
 .vscode-layout ::-webkit-scrollbar {
   width: 10px;

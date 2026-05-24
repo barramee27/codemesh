@@ -543,9 +543,185 @@
         });
     }
 
+    function userCanEditSession() {
+        return state.userRole === 'owner' || state.userRole === 'editor' || state.userRole === 'admin';
+    }
+
+    const LOCAL_IMPORT_EXT = new Set([
+        '.js', '.mjs', '.cjs', '.ts', '.tsx', '.jsx', '.html', '.htm', '.css', '.scss', '.less',
+        '.json', '.md', '.markdown', '.txt', '.py', '.java', '.cpp', '.cc', '.cxx', '.c', '.h', '.hpp',
+        '.go', '.rs', '.php', '.rb', '.yml', '.yaml', '.sql', '.sh', '.bash', '.xml', '.svg', '.vue', '.svelte'
+    ]);
+
+    function localImportPathOk(relPath) {
+        const n = String(relPath || '').replace(/\\/g, '/').replace(/^\/+/, '');
+        if (!n || n.includes('..')) return false;
+        const parts = n.split('/').filter(Boolean);
+        for (const seg of parts) {
+            if (seg.startsWith('.')) return false;
+            if (seg === 'node_modules' || seg === 'dist' || seg === 'build' || seg === 'vendor'
+                || seg === '.git' || seg === '__pycache__') return false;
+        }
+        const lower = n.toLowerCase();
+        if (lower.includes('package-lock.json') || lower.includes('yarn.lock')) return false;
+        const dot = lower.lastIndexOf('.');
+        const ext = dot >= 0 ? lower.slice(dot) : '';
+        if (LOCAL_IMPORT_EXT.has(ext)) return true;
+        const base = parts[parts.length - 1] || '';
+        return ['dockerfile', 'makefile', 'gemfile', 'rakefile', 'readme', 'license'].includes(base);
+    }
+
+    function readFileAsText(file) {
+        return new Promise((resolve, reject) => {
+            const r = new FileReader();
+            r.onload = () => resolve(r.result);
+            r.onerror = () => reject(r.error || new Error('Failed to read file'));
+            r.readAsText(file);
+        });
+    }
+
+    function applyReloadedSessionFiles(clientFiles) {
+        state.files.clear();
+        state.openTabs.clear();
+        let firstFileId = null;
+        const entries = Object.entries(clientFiles || {});
+        for (const [id, fileData] of entries) {
+            const doc = fileData.doc || '';
+            const lang = resolveEditorLanguage({
+                name: fileData.name,
+                language: fileData.language,
+                doc
+            }, doc);
+            state.files.set(id, {
+                id: fileData.id || id,
+                name: fileData.name,
+                doc,
+                language: lang,
+                version: fileData.version || 0
+            });
+            if (!firstFileId) firstFileId = id;
+        }
+        if (firstFileId) {
+            openFile(firstFileId);
+        } else {
+            state.activeFileId = null;
+            const container = document.getElementById('editor-container');
+            if (container) container.innerHTML = '';
+            if (state.editorView) {
+                state.editorView.dispose();
+                state.editorView = null;
+            }
+        }
+        renderFileTree();
+        renderTabs();
+        setSaveStatus('saved');
+    }
+
+    function reloadSessionFilesFromDb() {
+        return new Promise((resolve) => {
+            if (!state.socket || !state.currentSession) {
+                resolve();
+                return;
+            }
+            const onReload = (data) => {
+                clearTimeout(timer);
+                state.socket.off('session-files-reloaded', onReload);
+                applyReloadedSessionFiles(data.files);
+                resolve();
+            };
+            const timer = setTimeout(() => {
+                state.socket.off('session-files-reloaded', onReload);
+                resolve();
+            }, 12000);
+            state.socket.on('session-files-reloaded', onReload);
+            state.socket.emit('reload-session-from-db', { sessionId: state.currentSession });
+        });
+    }
+
+    function getRunStdin() {
+        const el = document.getElementById('run-stdin-input');
+        return el ? el.value : '';
+    }
+
+    function persistRunStdin() {
+        if (!state.currentSession) return;
+        try {
+            sessionStorage.setItem(`codemesh_stdin_${state.currentSession}`, getRunStdin());
+        } catch (_) { /* quota */ }
+    }
+
+    function restoreRunStdin() {
+        const el = document.getElementById('run-stdin-input');
+        if (!el || !state.currentSession) return;
+        try {
+            const saved = sessionStorage.getItem(`codemesh_stdin_${state.currentSession}`);
+            if (saved != null) el.value = saved;
+        } catch (_) { /* ignore */ }
+    }
+
+    async function importLocalFolder(fileList) {
+        if (!state.currentSession) {
+            showToast('Open a session first', 'error');
+            return;
+        }
+        if (!userCanEditSession()) {
+            showToast('Viewers cannot import files. Ask the owner for editor access.', 'error');
+            return;
+        }
+        const picked = Array.from(fileList || []);
+        if (!picked.length) return;
+
+        const payload = [];
+        let totalBytes = 0;
+        const MAX_FILES = 45;
+        const MAX_FILE_BYTES = 256 * 1024;
+        const MAX_TOTAL = 2 * 1024 * 1024;
+
+        picked.sort((a, b) => {
+            const pa = (a.webkitRelativePath || a.name).localeCompare(b.webkitRelativePath || b.name);
+            return pa;
+        });
+
+        for (const file of picked) {
+            if (payload.length >= MAX_FILES) break;
+            const rel = (file.webkitRelativePath || file.name).replace(/\\/g, '/');
+            if (!localImportPathOk(rel)) continue;
+            if (file.size > MAX_FILE_BYTES) continue;
+            if (totalBytes + file.size > MAX_TOTAL) break;
+            try {
+                const content = await readFileAsText(file);
+                const bytes = new Blob([content]).size;
+                if (bytes > MAX_FILE_BYTES) continue;
+                if (totalBytes + bytes > MAX_TOTAL) break;
+                totalBytes += bytes;
+                payload.push({ name: rel, content });
+            } catch (_) { /* skip unreadable */ }
+        }
+
+        if (!payload.length) {
+            showToast('No suitable text files in that folder (size/type limits apply)', 'error');
+            return;
+        }
+
+        try {
+            const result = await api(`/sessions/${state.currentSession}/import-files`, {
+                method: 'POST',
+                body: JSON.stringify({ files: payload })
+            });
+            showToast(result.message || `Imported ${payload.length} file(s)`, 'success');
+            await reloadSessionFilesFromDb();
+        } catch (err) {
+            showToast(err.message || 'Import failed', 'error');
+        }
+    }
+
     async function importGitHubIntoCurrentSession() {
         if (!state.currentSession) {
             showToast('Open a session first', 'error');
+            return;
+        }
+        if (!userCanEditSession()) {
+            showToast('Viewers cannot import from GitHub. Ask the owner for editor access.', 'error');
             return;
         }
         const raw = window.prompt('Public GitHub repo as owner/name (e.g. octocat/Hello-World):', '');
@@ -556,15 +732,18 @@
             return;
         }
         const branchRaw = window.prompt('Branch (leave empty for repo default):', '');
+        const subdirRaw = window.prompt('Folder inside repo (optional, e.g. src or homework/lab1):', '');
         try {
             const result = await api(`/sessions/${state.currentSession}/import-github`, {
                 method: 'POST',
                 body: JSON.stringify({
                     repo,
-                    branch: branchRaw && branchRaw.trim() ? branchRaw.trim() : undefined
+                    branch: branchRaw && branchRaw.trim() ? branchRaw.trim() : undefined,
+                    subdir: subdirRaw && subdirRaw.trim() ? subdirRaw.trim() : undefined
                 })
             });
-            showToast(result.message + ' — open the session again from the dashboard to load new files.', 'success');
+            showToast(result.message || 'Import complete', 'success');
+            if (result.reloadLive) await reloadSessionFilesFromDb();
         } catch (err) {
             showToast(err.message || 'Import failed', 'error');
         }
@@ -1135,9 +1314,11 @@
             }, LOCAL_BATCH_MS);
         }
 
-        setSaveStatus('unsaved');
-        clearTimeout(state.saveTimer);
-        state.saveTimer = setTimeout(() => manualSave(), 5000);
+        if (userCanEditSession()) {
+            setSaveStatus('unsaved');
+            clearTimeout(state.saveTimer);
+            state.saveTimer = setTimeout(() => manualSave(), 5000);
+        }
     }
 
     // ─── Remote Changes → Editor (batched for performance) ───
@@ -1241,6 +1422,10 @@
 
     async function manualSave() {
         if (!state.currentSession) return;
+        if (!userCanEditSession()) {
+            showToast('Viewers cannot save edits to the session', 'info');
+            return;
+        }
         setSaveStatus('saving');
         try {
             const files = Array.from(state.files.entries()).map(([id, f]) => ({
@@ -1315,6 +1500,7 @@
 
             // Connect WebSocket
             connectSocket(sessionId, sessionData);
+            restoreRunStdin();
 
         } catch (err) {
             setDocumentTitle(DEFAULT_DOC_TITLE);
@@ -1463,6 +1649,11 @@
             }
         });
 
+        state.socket.on('session-files-reloaded', (data) => {
+            applyReloadedSessionFiles(data.files);
+            showToast('Workspace files updated', 'info');
+        });
+
         state.socket.on('comment-added', (comment) => {
             state.comments.push(comment);
             if (state.activeCommentLine === comment.line) {
@@ -1545,7 +1736,12 @@
             state.userRole = data.role;
             updateRoleBadge(data.role);
             setEditorReadOnly(data.role === 'viewer');
-            showToast(data.message, data.role === 'viewer' ? 'error' : 'success');
+            showToast(
+                data.message || (data.role === 'viewer'
+                    ? 'You are a viewer: read-only editor, but you can still run code.'
+                    : 'Role updated'),
+                data.role === 'viewer' ? 'info' : 'success'
+            );
         });
 
         state.socket.on('user-role-updated', (data) => {
@@ -2056,7 +2252,7 @@
         if (readonly && !existing) {
             const overlay = document.createElement('div');
             overlay.className = 'viewer-overlay';
-            overlay.textContent = '\ud83d\udc41 View Only';
+            overlay.textContent = 'View only — you can still run code';
             container.style.position = 'relative';
             container.appendChild(overlay);
         } else if (!readonly && existing) {
@@ -2307,6 +2503,12 @@
 
         // ─── Run Code ───
         document.getElementById('run-code-btn')?.addEventListener('click', runCode);
+        document.getElementById('run-stdin-input')?.addEventListener('input', persistRunStdin);
+        document.getElementById('import-folder-input')?.addEventListener('change', async (e) => {
+            const list = e.target.files;
+            e.target.value = '';
+            if (list && list.length) await importLocalFolder(list);
+        });
 
         document.getElementById('clear-output-btn')?.addEventListener('click', () => {
             document.getElementById('output-content').innerHTML = '';
@@ -2340,6 +2542,13 @@
                 e.stopPropagation();
                 const action = item.dataset.action;
                 if (action === 'new-file') document.getElementById('create-file-action')?.click();
+                else if (action === 'import-folder') {
+                    if (!userCanEditSession()) {
+                        showToast('Viewers cannot import folders. Ask the owner for editor access.', 'error');
+                        return;
+                    }
+                    document.getElementById('import-folder-input')?.click();
+                }
                 else if (action === 'import-github') importGitHubIntoCurrentSession();
                 else if (action === 'save') manualSave();
                 else if (action === 'undo' && state.editorView) state.editorView.trigger('keyboard', 'undo', null);
@@ -2575,10 +2784,13 @@
         if (outputContent) outputContent.innerHTML = '<span class="output-info">⏳ Executing code...</span>';
         execTimeEl.textContent = '';
 
+        const stdin = getRunStdin();
+        persistRunStdin();
+
         try {
             const result = await api('/run', {
                 method: 'POST',
-                body: JSON.stringify({ code, language })
+                body: JSON.stringify({ code, language, stdin })
             });
 
             let html = '';

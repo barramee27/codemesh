@@ -4,13 +4,52 @@ const { v4: uuidv4 } = require('uuid');
 const Session = require('../models/Session');
 const User = require('../models/User');
 const authMiddleware = require('../middleware/auth');
-const { fetchPublicRepoFiles } = require('../utils/githubImport');
+const { fetchPublicRepoFiles, languageFromFilename, textLikeFile, shouldSkipPath } = require('../utils/githubImport');
+const { MAX_FILES, MAX_FILE_BYTES, MAX_TOTAL_BYTES } = require('../utils/sessionImportLimits');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'fallback_secret';
 
 const router = express.Router();
 
 const SESSION_ID_RE = /^[a-zA-Z0-9_-]{3,50}$/;
+
+function sessionCanEdit(session, userId, isAdmin) {
+    if (isAdmin) return true;
+    if (session.owner.toString() === userId) return true;
+    const collab = session.collaborators.find((c) => c.user.toString() === userId);
+    return !!(collab && collab.role === 'editor');
+}
+
+function normalizeImportPath(name) {
+    const n = String(name || '').replace(/\\/g, '/').replace(/^\/+/, '');
+    if (!n || n.includes('..')) return null;
+    const parts = n.split('/').filter((p) => p && p !== '.');
+    if (parts.some((p) => p === '..')) return null;
+    return parts.join('/');
+}
+
+function normalizeImportedFileList(rawFiles) {
+    if (!Array.isArray(rawFiles)) return [];
+    const out = [];
+    let totalBytes = 0;
+    for (const item of rawFiles) {
+        if (out.length >= MAX_FILES) break;
+        const rel = normalizeImportPath(item && item.name);
+        if (!rel || shouldSkipPath(rel) || !textLikeFile(rel)) continue;
+        const content = String(item.content != null ? item.content : '');
+        const bytes = Buffer.byteLength(content, 'utf8');
+        if (bytes > MAX_FILE_BYTES) continue;
+        if (totalBytes + bytes > MAX_TOTAL_BYTES) break;
+        totalBytes += bytes;
+        out.push({
+            id: 'f_' + uuidv4().split('-')[0],
+            name: rel,
+            content,
+            language: languageFromFilename(rel)
+        });
+    }
+    return out;
+}
 
 // POST /api/sessions/join-or-create — load or create a public session by ID (shareable URLs like /A2-042)
 router.post('/join-or-create', authMiddleware, async (req, res) => {
@@ -130,19 +169,20 @@ router.post('/:id/import-github', authMiddleware, async (req, res) => {
             return res.status(404).json({ error: 'Session not found' });
         }
 
-        const isOwner = session.owner.toString() === req.user.id;
-        const collab = session.collaborators.find((c) => c.user.toString() === req.user.id);
-        const canEdit = isOwner || (collab && collab.role === 'editor') || req.user.role === 'admin';
-        if (!canEdit) {
+        if (!sessionCanEdit(session, req.user.id, req.user.role === 'admin')) {
             return res.status(403).json({ error: 'You need editor access to import files' });
         }
 
-        const { repo, branch } = req.body;
+        const { repo, branch, subdir } = req.body;
         if (!repo || typeof repo !== 'string') {
             return res.status(400).json({ error: 'Body must include repo as "owner/name"' });
         }
 
-        const { files: imported, truncated, branch: usedBranch } = await fetchPublicRepoFiles(repo, branch);
+        const { files: imported, truncated, branch: usedBranch } = await fetchPublicRepoFiles(
+            repo,
+            branch,
+            subdir && String(subdir).trim() ? String(subdir).trim() : undefined
+        );
         if (!imported.length) {
             return res.status(400).json({
                 error: 'No suitable text files found (size/type limits), or repo is empty',
@@ -162,7 +202,8 @@ router.post('/:id/import-github', authMiddleware, async (req, res) => {
             importedCount: imported.length,
             truncated,
             branch: usedBranch,
-            session
+            session,
+            reloadLive: true
         });
     } catch (err) {
         console.error('import-github error:', err.message);
@@ -171,6 +212,44 @@ router.post('/:id/import-github', authMiddleware, async (req, res) => {
         else if (String(err.message || '').toLowerCase().includes('rate limit')) status = 429;
         else if (typeof err.status === 'number' && err.status >= 400 && err.status < 500) status = err.status;
         res.status(status).json({ error: err.message || 'GitHub import failed' });
+    }
+});
+
+// POST /api/sessions/:id/import-files — append files from local folder pick (browser → JSON)
+router.post('/:id/import-files', authMiddleware, async (req, res) => {
+    try {
+        const session = await Session.findOne({ sessionId: req.params.id });
+        if (!session) {
+            return res.status(404).json({ error: 'Session not found' });
+        }
+
+        if (!sessionCanEdit(session, req.user.id, req.user.role === 'admin')) {
+            return res.status(403).json({ error: 'You need editor access to import files' });
+        }
+
+        const imported = normalizeImportedFileList(req.body.files);
+        if (!imported.length) {
+            return res.status(400).json({
+                error: 'No suitable text files (check size/type limits: max 45 files, 256KB each, 2MB total)'
+            });
+        }
+
+        const existing = Array.isArray(session.files) ? [...session.files] : [];
+        session.files = existing.concat(imported);
+        session.updatedAt = Date.now();
+        await session.save();
+        await session.populate('owner', 'username');
+        await session.populate('collaborators.user', 'username');
+
+        res.json({
+            message: `Imported ${imported.length} file(s) into the workspace`,
+            importedCount: imported.length,
+            session,
+            reloadLive: true
+        });
+    } catch (err) {
+        console.error('import-files error:', err.message);
+        res.status(500).json({ error: err.message || 'Import failed' });
     }
 });
 
@@ -214,6 +293,14 @@ router.get('/:id', async (req, res) => {
 // PUT /api/sessions/:id — update session
 router.put('/:id', authMiddleware, async (req, res) => {
     try {
+        const session = await Session.findOne({ sessionId: req.params.id });
+        if (!session) {
+            return res.status(404).json({ error: 'Session not found' });
+        }
+        if (!sessionCanEdit(session, req.user.id, req.user.role === 'admin')) {
+            return res.status(403).json({ error: 'Viewers cannot save session changes' });
+        }
+
         const { code, title, language, files } = req.body;
         const update = {};
         if (code !== undefined) update.code = code;
@@ -222,17 +309,17 @@ router.put('/:id', authMiddleware, async (req, res) => {
         if (files !== undefined && Array.isArray(files)) update.files = files;
         update.updatedAt = Date.now();
 
-        const session = await Session.findOneAndUpdate(
+        const updated = await Session.findOneAndUpdate(
             { sessionId: req.params.id },
             { $set: update },
             { new: true }
         ).populate('owner', 'username');
 
-        if (!session) {
+        if (!updated) {
             return res.status(404).json({ error: 'Session not found' });
         }
 
-        res.json(session);
+        res.json(updated);
     } catch (err) {
         console.error('Update session error:', err);
         res.status(500).json({ error: 'Failed to update session' });

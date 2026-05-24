@@ -8,9 +8,7 @@ const { v4: uuidv4 } = require('uuid');
 
 const GH_API = 'https://api.github.com';
 
-const MAX_FILES = 45;
-const MAX_FILE_BYTES = 256 * 1024;
-const MAX_TOTAL_BYTES = 2 * 1024 * 1024;
+const { MAX_FILES, MAX_FILE_BYTES, MAX_TOTAL_BYTES } = require('./sessionImportLimits');
 
 const ALLOW_EXT = new Set([
     '.js', '.mjs', '.cjs', '.ts', '.tsx', '.jsx', '.html', '.htm', '.css', '.scss', '.less',
@@ -106,9 +104,10 @@ function pathSortScore(p) {
 /**
  * @param {string} repoSpec - "owner/name"
  * @param {string} [branchOpt]
+ * @param {string} [subdirOpt] - only import paths under this folder (e.g. "src" or "src/")
  * @returns {Promise<{ files: Array<{id,name,content,language}>, truncated: boolean, branch: string }>}
  */
-async function fetchPublicRepoFiles(repoSpec, branchOpt) {
+async function fetchPublicRepoFiles(repoSpec, branchOpt, subdirOpt) {
     const trimmed = String(repoSpec || '').trim();
     const m = trimmed.match(/^([a-zA-Z0-9_.-]+)\/([a-zA-Z0-9_.-]+)$/);
     if (!m) {
@@ -133,6 +132,12 @@ async function fetchPublicRepoFiles(repoSpec, branchOpt) {
         throw new Error('Empty or unreadable repository tree');
     }
 
+    let subdirPrefix = '';
+    if (subdirOpt && String(subdirOpt).trim()) {
+        subdirPrefix = String(subdirOpt).trim().replace(/^\/+|\/+$/g, '');
+        if (subdirPrefix) subdirPrefix += '/';
+    }
+
     const candidates = tree.tree.filter((t) => (
         t.type === 'blob'
         && t.path
@@ -141,6 +146,7 @@ async function fetchPublicRepoFiles(repoSpec, branchOpt) {
         && t.size <= MAX_FILE_BYTES
         && !shouldSkipPath(t.path)
         && textLikeFile(t.path)
+        && (!subdirPrefix || t.path.startsWith(subdirPrefix))
     ));
 
     candidates.sort((a, b) => {
@@ -172,9 +178,13 @@ async function fetchPublicRepoFiles(repoSpec, branchOpt) {
         if (totalBytes + text.length > MAX_TOTAL_BYTES) break;
         totalBytes += text.length;
 
+        let relPath = item.path.replace(/\\/g, '/');
+        if (subdirPrefix && relPath.startsWith(subdirPrefix)) {
+            relPath = relPath.slice(subdirPrefix.length);
+        }
         files.push({
             id: 'f_' + uuidv4().split('-')[0],
-            name: item.path.replace(/\\/g, '/'),
+            name: relPath,
             content: text,
             language: languageFromFilename(item.path)
         });
@@ -183,4 +193,4 @@ async function fetchPublicRepoFiles(repoSpec, branchOpt) {
     return { files, truncated: truncatedTree, branch };
 }
 
-module.exports = { fetchPublicRepoFiles };
+module.exports = { fetchPublicRepoFiles, languageFromFilename, textLikeFile, shouldSkipPath };

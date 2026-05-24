@@ -6,17 +6,20 @@ const router = express.Router();
 
 // POST /api/run — no stdin (interactive playground)
 router.post('/', authMiddleware, async (req, res) => {
-    const { code, language } = req.body;
+    const { code, language, stdin } = req.body;
 
     if (!code || !language) {
         return res.status(400).json({ error: 'Code and language are required' });
     }
 
+    const stdinText = stdin != null ? String(stdin) : '';
+    const stdinCapped = stdinText.length > 100000 ? stdinText.slice(0, 100000) : stdinText;
+
     try {
         const r = await executeCodeWithStdin({
             code,
             language,
-            stdin: '',
+            stdin: stdinCapped,
             timeLimitMs: DEFAULT_TIMEOUT_MS
         });
 

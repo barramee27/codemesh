@@ -234,9 +234,9 @@ module.exports = function setupCollaboration(io) {
                     }
                     // Also add as collaborator if not already
                     if (!collab) {
-                        dbSession.collaborators.push({ user: userId, role: 'editor' });
+                        dbSession.collaborators.push({ user: userId, role: 'viewer' });
                         await dbSession.save();
-                        userRole = 'editor';
+                        userRole = 'viewer';
                     }
                 }
             }
@@ -338,6 +338,58 @@ module.exports = function setupCollaboration(io) {
             scheduleSave(sessionId);
         });
 
+        function userCanEditSession(state, socketId) {
+            const u = state.users.get(socketId);
+            if (!u) return false;
+            return u.role === 'owner' || u.role === 'editor' || u.role === 'admin';
+        }
+
+        function dbFilesToMemoryMap(dbFiles) {
+            const map = new Map();
+            (dbFiles || []).forEach((f) => {
+                map.set(f.id, {
+                    id: f.id,
+                    name: f.name,
+                    doc: f.content || '',
+                    language: f.language || 'plaintext',
+                    version: 0,
+                    history: []
+                });
+            });
+            return map;
+        }
+
+        function clientFilesPayload(state) {
+            const clientFiles = {};
+            state.files.forEach((data, id) => {
+                clientFiles[id] = {
+                    id: data.id,
+                    name: data.name,
+                    doc: data.doc,
+                    language: data.language,
+                    version: data.version
+                };
+            });
+            return clientFiles;
+        }
+
+        socket.on('reload-session-from-db', async (data) => {
+            const { sessionId } = data;
+            if (!sessionId || socket.sessionId !== sessionId) return;
+            const state = activeSessions.get(sessionId);
+            if (!state) return;
+            try {
+                const dbSession = await Session.findOne({ sessionId });
+                if (!dbSession || !Array.isArray(dbSession.files)) return;
+                state.files = dbFilesToMemoryMap(dbSession.files);
+                io.to(sessionId).emit('session-files-reloaded', {
+                    files: clientFilesPayload(state)
+                });
+            } catch (err) {
+                console.error('reload-session-from-db:', err.message);
+            }
+        });
+
         // ─── File Management ───
         socket.on('create-file', (data) => {
             const { sessionId, name, language } = data;
@@ -345,6 +397,12 @@ module.exports = function setupCollaboration(io) {
 
             const state = activeSessions.get(sessionId);
             if (!state) return;
+            if (!userCanEditSession(state, socket.id)) {
+                socket.emit('readonly-error', {
+                    message: 'Viewers cannot create files. Ask the owner for editor access.'
+                });
+                return;
+            }
 
             const fileId = 'file_' + Math.random().toString(36).substring(2, 9);
             
@@ -372,6 +430,10 @@ module.exports = function setupCollaboration(io) {
 
             const state = activeSessions.get(sessionId);
             if (!state) return;
+            if (!userCanEditSession(state, socket.id)) {
+                socket.emit('readonly-error', { message: 'Viewers cannot delete files.' });
+                return;
+            }
 
             if (state.files.has(fileId)) {
                 state.files.delete(fileId);
@@ -386,6 +448,10 @@ module.exports = function setupCollaboration(io) {
 
             const state = activeSessions.get(sessionId);
             if (!state) return;
+            if (!userCanEditSession(state, socket.id)) {
+                socket.emit('readonly-error', { message: 'Viewers cannot rename files.' });
+                return;
+            }
 
             const file = state.files.get(fileId);
             if (file) {
@@ -435,7 +501,7 @@ module.exports = function setupCollaboration(io) {
             io.to(targetSocketId).emit('role-changed', {
                 role,
                 message: role === 'viewer'
-                    ? 'You have been set to view-only mode by the session owner'
+                    ? 'View-only mode: you cannot edit files, but you can still run code and use the output panel.'
                     : 'You now have editing permissions'
             });
 

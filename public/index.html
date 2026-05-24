@@ -549,7 +549,9 @@
             <div class="menubar-item" data-menu="file">File
             <div class="menubar-dropdown">
               <div class="menubar-dropdown-item" data-action="new-file">New File</div>
+              <div class="menubar-dropdown-item" data-action="import-folder">Import folder…</div>
               <div class="menubar-dropdown-item" data-action="import-github">Import from GitHub…</div>
+              <input type="file" id="import-folder-input" webkitdirectory directory multiple style="display:none" aria-hidden="true" />
               <div class="menubar-dropdown-divider"></div>
               <div class="menubar-dropdown-item" data-action="save">Save</div>
             </div>
@@ -772,7 +774,9 @@
               </button>
             </div>
           </div>
-          <div id="output-panel-content" class="panel-content">
+          <div id="output-panel-content" class="panel-content output-panel-stack">
+            <label class="run-stdin-label" for="run-stdin-input">Program input (stdin)</label>
+            <textarea id="run-stdin-input" class="run-stdin-input" rows="4" spellcheck="false" placeholder="Lines typed here are fed to your program when you Run (e.g. test data for scanf, input(), cin…)"></textarea>
             <pre id="output-content" class="output-content"></pre>
           </div>
           <div id="preview-panel-content" class="panel-content" style="display:none;">
