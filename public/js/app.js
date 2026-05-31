@@ -36,7 +36,8 @@
         pendingClassKey: null,
         splitEditor: null,
         splitActive: false,
-        splitFileId: null,
+        /** Right pane: local test buffer (name stem synced from left tab, language chosen separately) */
+        splitScratch: { language: 'python', doc: '', sourceStem: '' },
         focusedPane: 'primary', // 'primary' | 'split'
         terminal: null,
         /** Folder paths (e.g. `routes`) collapsed in explorer; absent = expanded */
@@ -44,6 +45,23 @@
     };
 
     let xtermCtorCached = null;
+
+    const SPLIT_SCRATCH_ID = '__split_test__';
+    const SPLIT_LANG_OPTIONS = [
+        ['python', 'Python'],
+        ['cpp', 'C++'],
+        ['c', 'C'],
+        ['java', 'Java'],
+        ['javascript', 'JavaScript'],
+        ['typescript', 'TypeScript'],
+        ['csharp', 'C#'],
+        ['go', 'Go'],
+        ['rust', 'Rust'],
+        ['php', 'PHP'],
+        ['ruby', 'Ruby'],
+        ['html', 'HTML'],
+        ['plaintext', 'Plain Text']
+    ];
 
     // ─── API Helper ───
     const API_BASE = '/api';
@@ -591,14 +609,102 @@
         if (state.activeFileId && state.editorView) {
             syncFileDocFromEditor(state.activeFileId, state.editorView);
         }
-        if (state.splitFileId && state.splitEditor) {
-            syncFileDocFromEditor(state.splitFileId, state.splitEditor);
+        if (state.splitActive && state.splitEditor) {
+            state.splitScratch.doc = state.splitEditor.getValue();
         }
     }
 
+    function extensionForLang(lang) {
+        return EXT_FOR_LANG[lang] || '.txt';
+    }
+
+    function getActiveFileStem() {
+        const file = state.activeFileId && state.files.get(state.activeFileId);
+        if (!file) return 'untitled';
+        const base = fileBasename(file.name);
+        const dot = base.lastIndexOf('.');
+        return dot > 0 ? base.slice(0, dot) : base;
+    }
+
+    function getSplitScratchDisplayName() {
+        const stem = state.splitScratch.sourceStem || getActiveFileStem();
+        return stem + extensionForLang(state.splitScratch.language);
+    }
+
+    function defaultSplitLanguageForLeft() {
+        const file = state.activeFileId && state.files.get(state.activeFileId);
+        const left = file ? resolveEditorLanguage(file, file.doc) : 'plaintext';
+        const prefer = ['python', 'cpp', 'java', 'javascript'];
+        for (const lang of prefer) {
+            if (lang !== left) return lang;
+        }
+        return left === 'python' ? 'cpp' : 'python';
+    }
+
+    function syncSplitScratchFromLeft() {
+        state.splitScratch.sourceStem = getActiveFileStem();
+        updateSplitPaneUI();
+    }
+
+    function updateSplitPaneUI() {
+        const nameEl = document.getElementById('split-pane-filename');
+        if (nameEl) {
+            nameEl.textContent = getSplitScratchDisplayName();
+            nameEl.title = `Synced from left file: ${getActiveFileStem()}${extensionForLang(state.splitScratch.language)}`;
+        }
+        const langSel = document.getElementById('split-pane-lang-select');
+        if (langSel && langSel.value !== state.splitScratch.language) {
+            langSel.value = state.splitScratch.language;
+        }
+    }
+
+    function populateSplitLangSelect() {
+        const sel = document.getElementById('split-pane-lang-select');
+        if (!sel || sel.options.length > 0) return;
+        sel.innerHTML = SPLIT_LANG_OPTIONS.map(([value, label]) =>
+            `<option value="${value}">${escapeHtml(label)}</option>`
+        ).join('');
+    }
+
+    function persistSplitScratch() {
+        if (!state.currentSession) return;
+        try {
+            sessionStorage.setItem(`codemesh_split_scratch_${state.currentSession}`, JSON.stringify({
+                language: state.splitScratch.language,
+                doc: state.splitScratch.doc,
+                sourceStem: state.splitScratch.sourceStem
+            }));
+        } catch (_) { /* quota */ }
+    }
+
+    function restoreSplitScratch() {
+        if (!state.currentSession) return;
+        try {
+            const raw = sessionStorage.getItem(`codemesh_split_scratch_${state.currentSession}`);
+            if (!raw) return;
+            const data = JSON.parse(raw);
+            if (data.language) state.splitScratch.language = data.language;
+            if (data.doc != null) state.splitScratch.doc = String(data.doc);
+            if (data.sourceStem) state.splitScratch.sourceStem = data.sourceStem;
+        } catch (_) { /* ignore */ }
+    }
+
+    function setSplitScratchLanguage(lang, updateEditor) {
+        state.splitScratch.language = lang;
+        updateSplitPaneUI();
+        if (updateEditor && state.splitEditor && monacoLoaded) {
+            monaco.editor.setModelLanguage(state.splitEditor.getModel(), mapLanguageToMonaco(lang));
+        }
+        if (state.focusedPane === 'split') {
+            updateStatusbarLanguage(lang);
+            if (state.splitEditor) updateStdinHintForCode(state.splitEditor.getValue(), 'split');
+        }
+        persistSplitScratch();
+    }
+
     function getFocusedFileId() {
-        if (state.splitActive && state.focusedPane === 'split' && state.splitFileId) {
-            return state.splitFileId;
+        if (state.splitActive && state.focusedPane === 'split') {
+            return SPLIT_SCRATCH_ID;
         }
         return state.activeFileId;
     }
@@ -611,18 +717,8 @@
     }
 
     function getEditorForFileId(fileId) {
+        if (fileId === SPLIT_SCRATCH_ID && state.splitActive) return state.splitEditor;
         if (fileId === state.activeFileId) return state.editorView;
-        if (fileId === state.splitFileId && state.splitActive) return state.splitEditor;
-        return null;
-    }
-
-    function pickDefaultSplitFileId() {
-        for (const id of state.tabOrder) {
-            if (id !== state.activeFileId && state.files.has(id)) return id;
-        }
-        for (const id of state.files.keys()) {
-            if (id !== state.activeFileId) return id;
-        }
         return null;
     }
 
@@ -633,26 +729,13 @@
         secondary?.classList.toggle('focused-pane', state.splitActive && state.focusedPane === 'split');
     }
 
-    function populateSplitFileSelect() {
-        const sel = document.getElementById('split-pane-file-select');
-        if (!sel) return;
-        const parts = [];
-        state.files.forEach((file, id) => {
-            const lang = file.language || resolveEditorLanguage(file, file.doc);
-            const label = `${fileBasename(file.name)} (${lang})`;
-            const selected = id === state.splitFileId ? ' selected' : '';
-            parts.push(`<option value="${id.replace(/"/g, '&quot;')}"${selected}>${escapeHtml(label)}</option>`);
-        });
-        sel.innerHTML = parts.join('');
-        if (state.splitFileId) sel.value = state.splitFileId;
-    }
-
     function updateSplitLayout() {
         const splitContainer = document.getElementById('editor-split-container');
         const pane2 = document.getElementById('editor-split-pane-secondary');
         if (splitContainer) splitContainer.classList.toggle('split-active', state.splitActive);
         if (pane2) pane2.style.display = state.splitActive ? 'flex' : 'none';
-        populateSplitFileSelect();
+        populateSplitLangSelect();
+        updateSplitPaneUI();
         updateSplitPaneFocusStyles();
     }
 
@@ -665,19 +748,23 @@
     }
 
     function mountSplitEditor() {
-        if (!state.splitActive || !state.splitFileId) return;
+        if (!state.splitActive) return;
+        syncSplitScratchFromLeft();
         const container2 = document.getElementById('editor-container-2');
         if (!container2) return;
         if (state.splitEditor) {
+            state.splitScratch.doc = state.splitEditor.getValue();
             state.splitEditor.dispose();
             state.splitEditor = null;
         }
-        state.splitEditor = mountEditorInContainer(container2, state.splitFileId);
+        container2.innerHTML = '';
+        const lang = state.splitScratch.language;
+        state.splitEditor = createEditor(container2, state.splitScratch.doc || '', lang, SPLIT_SCRATCH_ID);
         if (state.splitEditor) {
             state.splitEditor.onDidFocusEditorWidget(() => {
                 state.focusedPane = 'split';
-                const file = state.files.get(state.splitFileId);
-                if (file) updateStatusbarLanguage(resolveEditorLanguage(file, file.doc));
+                updateStatusbarLanguage(state.splitScratch.language);
+                updateStdinHintForCode(state.splitEditor.getValue(), 'split');
                 updateSplitPaneFocusStyles();
             });
             if (state.userRole === 'viewer') {
@@ -688,44 +775,53 @@
     }
 
     function enableEditorSplit() {
-        if (state.files.size < 2) {
-            showToast('Add at least two files to compare in split view. Alt+click a tab to open it on the right.', 'info');
-            return false;
+        if (!state.editorView) return false;
+        populateSplitLangSelect();
+        if (!state.splitScratch.language) {
+            state.splitScratch.language = defaultSplitLanguageForLeft();
         }
         state.splitActive = true;
-        if (!state.splitFileId || !state.files.has(state.splitFileId) || state.splitFileId === state.activeFileId) {
-            state.splitFileId = pickDefaultSplitFileId();
-        }
-        if (!state.splitFileId) {
-            state.splitActive = false;
-            showToast('No other file available for the right pane', 'info');
-            return false;
-        }
+        syncSplitScratchFromLeft();
         updateSplitLayout();
         mountSplitEditor();
-        renderTabs();
+        restoreSplitStdin();
         return true;
     }
 
     function disableEditorSplit() {
         if (state.splitEditor) {
+            state.splitScratch.doc = state.splitEditor.getValue();
+            persistSplitScratch();
             state.splitEditor.dispose();
             state.splitEditor = null;
         }
         state.splitActive = false;
-        state.splitFileId = null;
         state.focusedPane = 'primary';
         const container2 = document.getElementById('editor-container-2');
         if (container2) container2.innerHTML = '';
         updateSplitLayout();
-        renderTabs();
     }
 
-    function applyLanguageToSplitEditor(lang) {
-        if (!state.splitEditor || !monacoLoaded) return;
-        monaco.editor.setModelLanguage(state.splitEditor.getModel(), mapLanguageToMonaco(lang));
-        renderFileTree();
-        renderTabs();
+    function getSplitStdin() {
+        const el = document.getElementById('run-stdin-split-input');
+        return el ? el.value : '';
+    }
+
+    function persistSplitStdin() {
+        if (!state.currentSession) return;
+        try {
+            sessionStorage.setItem(`codemesh_stdin_split_${state.currentSession}`, getSplitStdin());
+        } catch (_) { /* quota */ }
+        if (state.splitEditor) updateStdinHintForCode(state.splitEditor.getValue(), 'split');
+    }
+
+    function restoreSplitStdin() {
+        const el = document.getElementById('run-stdin-split-input');
+        if (!el || !state.currentSession) return;
+        try {
+            const saved = sessionStorage.getItem(`codemesh_stdin_split_${state.currentSession}`);
+            if (saved != null) el.value = saved;
+        } catch (_) { /* ignore */ }
     }
 
     function hydrateFilesFromSessionPayload(sessionData) {
@@ -1147,10 +1243,15 @@
         }
     }
 
-    function updateStdinHintForCode(code) {
+    function updateStdinHintForCode(code, pane) {
+        const needs = codeNeedsStdin(code);
+        if (pane === 'split') {
+            const input = document.getElementById('run-stdin-split-input');
+            if (input) input.classList.toggle('stdin-needed', needs && !input.value.trim());
+            return;
+        }
         const hint = document.getElementById('run-stdin-hint');
         const input = document.getElementById('run-stdin-input');
-        const needs = codeNeedsStdin(code);
         if (hint) hint.style.display = needs ? '' : 'none';
         if (input) input.classList.toggle('stdin-needed', needs && !input.value.trim());
     }
@@ -1386,7 +1487,8 @@
         });
     }
 
-    function getRunStdin() {
+    function getRunStdin(pane) {
+        if (pane === 'split') return getSplitStdin();
         const el = document.getElementById('run-stdin-input');
         return el ? el.value : '';
     }
@@ -1394,9 +1496,9 @@
     function persistRunStdin() {
         if (!state.currentSession) return;
         try {
-            sessionStorage.setItem(`codemesh_stdin_${state.currentSession}`, getRunStdin());
+            sessionStorage.setItem(`codemesh_stdin_${state.currentSession}`, getRunStdin('primary'));
         } catch (_) { /* quota */ }
-        if (state.editorView) updateStdinHintForCode(state.editorView.getValue());
+        if (state.editorView) updateStdinHintForCode(state.editorView.getValue(), 'primary');
     }
 
     function restoreRunStdin() {
@@ -1406,6 +1508,8 @@
             const saved = sessionStorage.getItem(`codemesh_stdin_${state.currentSession}`);
             if (saved != null) el.value = saved;
         } catch (_) { /* ignore */ }
+        restoreSplitStdin();
+        restoreSplitScratch();
     }
 
     async function importLocalFolder(fileList) {
@@ -1895,17 +1999,7 @@
         return inferLanguageFromContent(doc);
     }
 
-    function downloadActiveFile() {
-        const file = state.activeFileId ? state.files.get(state.activeFileId) : null;
-        if (!file || !state.editorView) return;
-        const text = state.editorView.getValue();
-        const lang = resolveEditorLanguage(file, text);
-        const baseFromPath = (file.name || 'snippet').split('/').pop() || 'snippet';
-        const hasKnownExt = /\.[a-zA-Z0-9]{1,12}$/.test(baseFromPath);
-        let filename = baseFromPath;
-        if (!hasKnownExt) {
-            filename = `snippet${extensionForLanguage(lang)}`;
-        }
+    function downloadTextAsFile(text, filename) {
         const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
         const a = document.createElement('a');
         a.href = URL.createObjectURL(blob);
@@ -1916,6 +2010,35 @@
         a.remove();
         setTimeout(() => URL.revokeObjectURL(a.href), 2000);
         showToast(`Downloaded ${filename}`, 'success');
+    }
+
+    function downloadActiveFile() {
+        if (state.splitActive && state.focusedPane === 'split') {
+            downloadSplitScratch();
+            return;
+        }
+        const file = state.activeFileId ? state.files.get(state.activeFileId) : null;
+        if (!file || !state.editorView) return;
+        const text = state.editorView.getValue();
+        const lang = resolveEditorLanguage(file, text);
+        const baseFromPath = (file.name || 'snippet').split('/').pop() || 'snippet';
+        const hasKnownExt = /\.[a-zA-Z0-9]{1,12}$/.test(baseFromPath);
+        let filename = baseFromPath;
+        if (!hasKnownExt) {
+            filename = `snippet${extensionForLanguage(lang)}`;
+        }
+        downloadTextAsFile(text, filename);
+    }
+
+    function downloadSplitScratch() {
+        if (!state.splitActive || !state.splitEditor) {
+            showToast('Open the split test pane first', 'info');
+            return;
+        }
+        syncSplitScratchFromLeft();
+        state.splitScratch.doc = state.splitEditor.getValue();
+        const filename = getSplitScratchDisplayName();
+        downloadTextAsFile(state.splitScratch.doc, filename);
     }
 
     let languageInferTimer = null;
@@ -1995,7 +2118,7 @@
             }
         });
 
-        updateStdinHintForCode(doc);
+        updateStdinHintForCode(doc, fileId === SPLIT_SCRATCH_ID ? 'split' : 'primary');
         layoutMonacoEditor();
         return editor;
     }
@@ -2028,7 +2151,18 @@
     const LOCAL_BATCH_MS = 30; // Buffer rapid edits for 30ms
 
     function handleLocalChange(e, fileId, editor) {
-        if (!state.socket || !state.currentSession || !fileId) return;
+        if (!fileId) return;
+
+        if (fileId === SPLIT_SCRATCH_ID) {
+            state.splitScratch.doc = editor.getValue();
+            persistSplitScratch();
+            if (getFocusedFileId() === SPLIT_SCRATCH_ID) {
+                updateStdinHintForCode(editor.getValue(), 'split');
+            }
+            return;
+        }
+
+        if (!state.socket || !state.currentSession) return;
 
         const model = editor.getModel();
         if (!model) return;
@@ -2144,7 +2278,7 @@
     // ─── Cursor Broadcasting ───
     let cursorTimer = null;
     function handleCursorUpdate(e, fileId) {
-        if (!state.socket || !state.currentSession || !fileId) return;
+        if (!fileId) return;
         if (fileId !== getFocusedFileId()) return;
         const editor = getEditorForFileId(fileId);
         if (!editor) return;
@@ -2156,16 +2290,19 @@
             const model = editor.getModel();
             if (!model) return;
 
-            const headOffset = model.getOffsetAt({ lineNumber: selection.positionLineNumber, column: selection.positionColumn });
-            const fromOffset = model.getOffsetAt({ lineNumber: selection.startLineNumber, column: selection.startColumn });
-            const toOffset = model.getOffsetAt({ lineNumber: selection.endLineNumber, column: selection.endColumn });
+            if (fileId !== SPLIT_SCRATCH_ID) {
+                if (!state.socket || !state.currentSession) return;
+                const headOffset = model.getOffsetAt({ lineNumber: selection.positionLineNumber, column: selection.positionColumn });
+                const fromOffset = model.getOffsetAt({ lineNumber: selection.startLineNumber, column: selection.startColumn });
+                const toOffset = model.getOffsetAt({ lineNumber: selection.endLineNumber, column: selection.endColumn });
 
-            state.socket.emit('cursor-update', {
-                sessionId: state.currentSession,
-                fileId,
-                cursor: { line: selection.positionLineNumber, ch: selection.positionColumn },
-                selection: { from: fromOffset, to: toOffset, head: headOffset }
-            });
+                state.socket.emit('cursor-update', {
+                    sessionId: state.currentSession,
+                    fileId,
+                    cursor: { line: selection.positionLineNumber, ch: selection.positionColumn },
+                    selection: { from: fromOffset, to: toOffset, head: headOffset }
+                });
+            }
 
             updateStatusbarCursor(selection);
         }, 50);
@@ -2415,16 +2552,6 @@
             renderFileTree();
             renderTabs();
             
-            if (state.splitFileId === data.fileId) {
-                if (state.files.size < 2) disableEditorSplit();
-                else {
-                    const next = pickDefaultSplitFileId();
-                    if (next) {
-                        state.splitFileId = next;
-                        mountSplitEditor();
-                    } else disableEditorSplit();
-                }
-            }
             if (state.activeFileId === data.fileId) {
                 if (state.openTabs.size > 0) {
                     openFileInPrimary(Array.from(state.openTabs)[0]);
@@ -2500,7 +2627,7 @@
             if (file) {
                 file.version = version;
                 // If it's the active file, apply to editor
-                if (fileId === state.activeFileId || fileId === state.splitFileId) {
+                if (fileId === state.activeFileId) {
                     applyRemoteChange(op, fileId);
                 } else {
                     // Just update the doc in memory
@@ -2555,9 +2682,6 @@
                 if (fileId === state.activeFileId) {
                     updateStatusbarLanguage(language);
                     applyLanguageToActiveEditor(language);
-                } else if (fileId === state.splitFileId) {
-                    applyLanguageToSplitEditor(language);
-                    if (state.focusedPane === 'split') updateStatusbarLanguage(language);
                 } else {
                     renderFileTree();
                     renderTabs();
@@ -2669,6 +2793,11 @@
         const editor = getFocusedEditor();
         if (!editor || !monacoLoaded || !fileId) return;
 
+        if (fileId === SPLIT_SCRATCH_ID) {
+            setSplitScratchLanguage(lang, true);
+            return;
+        }
+
         if (state.socket && state.currentSession) {
             state.socket.emit('language-change', {
                 sessionId: state.currentSession,
@@ -2679,12 +2808,7 @@
             if (file) file.language = lang;
         }
 
-        if (fileId === state.activeFileId) {
-            applyLanguageToActiveEditor(lang);
-        } else if (fileId === state.splitFileId) {
-            applyLanguageToSplitEditor(lang);
-            updateStatusbarLanguage(lang);
-        }
+        applyLanguageToActiveEditor(lang);
     }
 
     // ─── File Tree (nested folders from path names, e.g. routes/auth.js) ───
@@ -2867,10 +2991,9 @@
             else if (lang === 'plaintext') { iconClass = 'codicon-file'; iconColor = '#6e7681'; }
 
             const isActive = id === state.activeFileId ? 'active' : '';
-            const inSplit = state.splitActive && id === state.splitFileId ? ' tab-in-split' : '';
             const tabLabel = fileBasename(file.name);
             html += `
-                <div class="editor-tab ${isActive}${inSplit}" draggable="true" data-file-id="${id}" onclick="openFile('${id}', event)" title="Alt+click to open in right pane">
+                <div class="editor-tab ${isActive}" draggable="true" data-file-id="${id}" onclick="openFile('${id}', event)" title="Alt+click: copy name &amp; language to right test pane">
                     <i class="codicon ${iconClass} tab-icon" style="color: ${iconColor}; margin-right: 6px;"></i>
                     <span class="tab-title" title="${escapeHtml(file.name)}">${escapeHtml(tabLabel)}</span>
                     <button class="btn btn-icon btn-xs tab-close" onclick="event.stopPropagation(); closeTab('${id}')" style="background:none;border:none;color:inherit;cursor:pointer;">
@@ -2903,15 +3026,7 @@
             });
         }
 
-        if (state.splitActive && state.splitFileId === fileId) {
-            const next = pickDefaultSplitFileId();
-            if (next) {
-                state.splitFileId = next;
-                mountSplitEditor();
-            } else {
-                disableEditorSplit();
-            }
-        }
+        if (state.splitActive) syncSplitScratchFromLeft();
 
         if (state.userRole === 'viewer') setEditorReadOnly(true);
 
@@ -2922,7 +3037,7 @@
             tryAutoRenameForInferredLang(file, file.doc);
         }
 
-        updateStdinHintForCode(file.doc);
+        updateStdinHintForCode(file.doc, 'primary');
         renderFileTree();
         renderTabs();
         updateSplitLayout();
@@ -2931,22 +3046,20 @@
         updateCommentGutter();
     }
 
-    function openFileInSplit(fileId) {
+    function openScratchFromTab(fileId) {
         if (!state.files.has(fileId)) return;
-        state.openTabs.add(fileId);
-        syncTabOrder();
-        state.splitFileId = fileId;
-        if (!state.splitActive) {
-            if (!enableEditorSplit()) return;
-        } else {
+        const file = state.files.get(fileId);
+        const base = fileBasename(file.name);
+        const dot = base.lastIndexOf('.');
+        state.splitScratch.sourceStem = dot > 0 ? base.slice(0, dot) : base;
+        state.splitScratch.language = resolveEditorLanguage(file, file.doc);
+        if (!state.splitActive) enableEditorSplit();
+        else {
+            updateSplitPaneUI();
             mountSplitEditor();
-            updateSplitLayout();
         }
         state.focusedPane = 'split';
-        const file = state.files.get(fileId);
-        if (file) updateStatusbarLanguage(resolveEditorLanguage(file, file.doc));
-        renderTabs();
-        updateSplitPaneFocusStyles();
+        updateStatusbarLanguage(state.splitScratch.language);
         state.splitEditor?.focus();
     }
 
@@ -2954,7 +3067,7 @@
         if (!state.files.has(fileId)) return;
         const openInSplit = ev && (ev.altKey || (ev.metaKey && ev.shiftKey));
         if (openInSplit) {
-            openFileInSplit(fileId);
+            openScratchFromTab(fileId);
             return;
         }
         openFileInPrimary(fileId);
@@ -2964,20 +3077,6 @@
         state.openTabs.delete(fileId);
         state.tabOrder = state.tabOrder.filter((id) => id !== fileId);
         
-        if (state.splitFileId === fileId) {
-            if (state.files.size < 2) {
-                disableEditorSplit();
-            } else {
-                const next = pickDefaultSplitFileId();
-                if (next) {
-                    state.splitFileId = next;
-                    mountSplitEditor();
-                } else {
-                    disableEditorSplit();
-                }
-            }
-        }
-
         if (state.activeFileId === fileId) {
             if (state.openTabs.size > 0) {
                 openFileInPrimary(Array.from(state.openTabs)[0]);
@@ -3611,10 +3710,16 @@
         document.getElementById('close-split-pane-btn')?.addEventListener('click', () => {
             disableEditorSplit();
         });
-        document.getElementById('split-pane-file-select')?.addEventListener('change', (e) => {
-            const fileId = e.target.value;
-            if (fileId && state.files.has(fileId)) openFileInSplit(fileId);
+        document.getElementById('split-pane-lang-select')?.addEventListener('change', (e) => {
+            setSplitScratchLanguage(e.target.value, true);
         });
+        document.getElementById('split-pane-run-btn')?.addEventListener('click', () => {
+            runCode({ pane: 'split' });
+        });
+        document.getElementById('split-pane-download-btn')?.addEventListener('click', () => {
+            downloadSplitScratch();
+        });
+        document.getElementById('run-stdin-split-input')?.addEventListener('input', persistSplitStdin);
 
         // ─── Panel Tab Switching ───
         document.querySelectorAll('#panel-tabs .vscode-panel-tab').forEach(tab => {
@@ -3668,16 +3773,24 @@
     }
 
     // ─── Code Execution ───
-    async function runCode() {
-        const editor = getFocusedEditor();
-        const fileId = getFocusedFileId();
-        if (!editor || !fileId) return;
+    async function runCode(options = {}) {
+        const pane = options.pane || (state.splitActive && state.focusedPane === 'split' ? 'split' : 'primary');
+        const editor = pane === 'split' ? state.splitEditor : state.editorView;
+        if (!editor) return;
 
         const code = editor.getValue();
-        const active = state.files.get(fileId);
-        const language = active
-            ? resolveEditorLanguage(active, code)
-            : 'plaintext';
+        const isSplitRun = pane === 'split';
+        const language = isSplitRun
+            ? state.splitScratch.language
+            : (() => {
+                const fileId = state.activeFileId;
+                const active = fileId && state.files.get(fileId);
+                return active ? resolveEditorLanguage(active, code) : 'plaintext';
+            })();
+
+        const runLabel = isSplitRun ? getSplitScratchDisplayName() : (state.activeFileId && state.files.get(state.activeFileId)
+            ? fileBasename(state.files.get(state.activeFileId).name)
+            : 'editor');
 
         if (!code.trim()) {
             showToast('Nothing to run — editor is empty', 'error');
@@ -3685,6 +3798,7 @@
         }
 
         const runBtn = document.getElementById('run-code-btn');
+        const splitRunBtn = document.getElementById('split-pane-run-btn');
         const unifiedPanel = document.getElementById('unified-panel');
         const outputPanelContent = document.getElementById('output-panel-content');
         const previewContent = document.getElementById('preview-panel-content');
@@ -3710,23 +3824,31 @@
             return;
         }
 
-        updateStdinHintForCode(code);
+        updateStdinHintForCode(code, pane);
         ensureRunPanelVisible();
-        if (codeNeedsStdin(code) && !getRunStdin().trim()) {
-            showToast('This program reads stdin (cin, scanf, input…). Add input in the OUTPUT panel below, then Run again.', 'info');
-            document.getElementById('run-stdin-input')?.focus();
+        const stdin = getRunStdin(pane);
+        if (codeNeedsStdin(code) && !stdin.trim()) {
+            const where = isSplitRun
+                ? 'Add input in the stdin box under the right pane, then Run again.'
+                : 'Add input in the OUTPUT panel below, then Run again.';
+            showToast(`This program reads stdin (cin, scanf, input…). ${where}`, 'info');
+            if (isSplitRun) document.getElementById('run-stdin-split-input')?.focus();
+            else document.getElementById('run-stdin-input')?.focus();
         }
 
         const outputContent = document.getElementById('output-content');
         const execTimeEl = document.getElementById('exec-time');
-        runBtn.classList.add('running');
-        const runBtnSpan = runBtn.querySelector('span');
+        runBtn?.classList.add('running');
+        splitRunBtn?.classList.add('running');
+        const runBtnSpan = runBtn?.querySelector('span');
         if (runBtnSpan) runBtnSpan.textContent = 'Running...';
-        if (outputContent) outputContent.innerHTML = '<span class="output-info">⏳ Executing code...</span>';
+        if (outputContent) {
+            outputContent.innerHTML = `<span class="output-info">⏳ Running ${escapeHtml(runLabel)} (${escapeHtml(language)})…</span>`;
+        }
         execTimeEl.textContent = '';
 
-        const stdin = getRunStdin();
-        persistRunStdin();
+        if (isSplitRun) persistSplitStdin();
+        else persistRunStdin();
 
         try {
             const result = await api('/run', {
@@ -3764,8 +3886,9 @@
             outputContent.innerHTML = `<span class="output-error">Error: ${escapeHtml(err.message)}</span>`;
             execTimeEl.textContent = '';
         } finally {
-            runBtn.classList.remove('running');
-            const runBtnSpan = runBtn.querySelector('span');
+            runBtn?.classList.remove('running');
+            splitRunBtn?.classList.remove('running');
+            const runBtnSpan = runBtn?.querySelector('span');
             if (runBtnSpan) runBtnSpan.textContent = 'Run';
         }
     }

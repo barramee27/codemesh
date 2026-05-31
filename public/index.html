@@ -747,10 +747,10 @@
             <button class="vscode-action-btn" id="run-code-btn" title="Run Code (Ctrl+Enter)">
               <i class="codicon codicon-play"></i>
             </button>
-            <button class="vscode-action-btn" id="download-active-file-btn" title="Download active file (extension from language)">
+            <button class="vscode-action-btn" id="download-active-file-btn" title="Download focused pane (left file, or right test pane if focused)">
               <i class="codicon codicon-cloud-download"></i>
             </button>
-            <button class="vscode-action-btn" id="split-editor-btn" title="Split editor — right pane can show another file (Alt+click a tab)">
+            <button class="vscode-action-btn" id="split-editor-btn" title="Split editor — right pane: test code (name synced from left, pick language, own stdin)">
               <i class="codicon codicon-split-horizontal"></i>
             </button>
             <button class="vscode-action-btn" id="copy-session-link" title="Copy Invite Link">
@@ -772,11 +772,23 @@
             </div>
             <div class="editor-split-pane editor-split-pane-secondary" id="editor-split-pane-secondary" data-pane="split" style="display:none;">
               <div class="split-pane-bar" id="split-pane-bar-secondary">
-                <span class="split-pane-bar-label">Right pane</span>
-                <select id="split-pane-file-select" class="split-pane-file-select" title="Choose file for right pane"></select>
+                <span class="split-pane-bar-label">Test</span>
+                <span id="split-pane-filename" class="split-pane-filename" title="Name synced from left file">untitled.py</span>
+                <select id="split-pane-lang-select" class="split-pane-lang-select" title="Language for right test pane"></select>
+                <button type="button" class="btn btn-primary btn-xs split-pane-run-btn" id="split-pane-run-btn" title="Run right pane (Ctrl+Enter when focused)">
+                  <i class="codicon codicon-play"></i> Run
+                </button>
+                <button type="button" class="btn btn-icon btn-xs split-pane-download-btn" id="split-pane-download-btn" title="Download right pane as file">
+                  <i class="codicon codicon-cloud-download"></i>
+                </button>
                 <button type="button" class="btn btn-icon btn-xs split-pane-close-btn" id="close-split-pane-btn" title="Close split">
                   <i class="codicon codicon-close"></i>
                 </button>
+              </div>
+              <div id="split-pane-stdin-wrap" class="split-pane-stdin-wrap">
+                <label class="split-pane-stdin-label" for="run-stdin-split-input">stdin (right pane)</label>
+                <textarea id="run-stdin-split-input" class="run-stdin-input split-stdin-input" rows="3" spellcheck="false"
+                  placeholder="Input for the right pane test run (cin, scanf, input()…)"></textarea>
               </div>
               <div id="editor-container-2" class="editor-container editor-split-second"></div>
             </div>
