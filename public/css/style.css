@@ -1153,11 +1153,69 @@ select.input-full {
   min-width: 0;
 }
 
-.editor-split-container.split-active .editor-split-second {
+.editor-split-pane {
+  display: flex;
+  flex-direction: column;
   flex: 1;
   min-width: 0;
-  display: flex !important;
+  min-height: 0;
+}
+
+.editor-split-container.split-active .editor-split-pane-primary {
+  flex: 1;
+  min-width: 0;
+}
+
+.editor-split-container.split-active .editor-split-pane-secondary {
+  flex: 1;
+  min-width: 0;
   border-left: 1px solid var(--vscode-panel-border, #454545);
+}
+
+.editor-split-pane.focused-pane .editor-container {
+  box-shadow: inset 0 0 0 1px var(--accent-primary, #6c5ce7);
+}
+
+.split-pane-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 8px;
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--vscode-panel-title-inactive-fg, #969696);
+  background: var(--vscode-titlebar-bg, #252526);
+  border-bottom: 1px solid var(--vscode-panel-border, #454545);
+}
+
+.split-pane-bar-label {
+  flex-shrink: 0;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 10px;
+}
+
+.split-pane-file-select {
+  flex: 1;
+  min-width: 0;
+  max-width: 100%;
+  padding: 2px 6px;
+  border-radius: 4px;
+  border: 1px solid var(--vscode-border, #454545);
+  background: var(--vscode-input-bg, #3c3c3c);
+  color: var(--vscode-input-fg, #ccc);
+  font-size: 12px;
+}
+
+.split-pane-close-btn {
+  flex-shrink: 0;
+}
+
+.editor-tab.tab-in-split::after {
+  content: ' ◫';
+  font-size: 9px;
+  opacity: 0.75;
 }
 
 .editor-container {

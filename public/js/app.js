@@ -36,6 +36,8 @@
         pendingClassKey: null,
         splitEditor: null,
         splitActive: false,
+        splitFileId: null,
+        focusedPane: 'primary', // 'primary' | 'split'
         terminal: null,
         /** Folder paths (e.g. `routes`) collapsed in explorer; absent = expanded */
         fileTreeCollapsed: new Set()
@@ -569,12 +571,161 @@
     }
 
     function layoutMonacoEditor() {
-        if (!state.editorView) return;
+        layoutMonacoEditors();
+    }
+
+    function layoutMonacoEditors() {
         requestAnimationFrame(() => {
-            try {
-                state.editorView.layout();
-            } catch (_) { /* ignore */ }
+            try { state.editorView?.layout(); } catch (_) { /* ignore */ }
+            try { state.splitEditor?.layout(); } catch (_) { /* ignore */ }
         });
+    }
+
+    function syncFileDocFromEditor(fileId, editor) {
+        if (!fileId || !editor) return;
+        const file = state.files.get(fileId);
+        if (file) file.doc = editor.getValue();
+    }
+
+    function syncAllOpenEditorsToFiles() {
+        if (state.activeFileId && state.editorView) {
+            syncFileDocFromEditor(state.activeFileId, state.editorView);
+        }
+        if (state.splitFileId && state.splitEditor) {
+            syncFileDocFromEditor(state.splitFileId, state.splitEditor);
+        }
+    }
+
+    function getFocusedFileId() {
+        if (state.splitActive && state.focusedPane === 'split' && state.splitFileId) {
+            return state.splitFileId;
+        }
+        return state.activeFileId;
+    }
+
+    function getFocusedEditor() {
+        if (state.splitActive && state.focusedPane === 'split' && state.splitEditor) {
+            return state.splitEditor;
+        }
+        return state.editorView;
+    }
+
+    function getEditorForFileId(fileId) {
+        if (fileId === state.activeFileId) return state.editorView;
+        if (fileId === state.splitFileId && state.splitActive) return state.splitEditor;
+        return null;
+    }
+
+    function pickDefaultSplitFileId() {
+        for (const id of state.tabOrder) {
+            if (id !== state.activeFileId && state.files.has(id)) return id;
+        }
+        for (const id of state.files.keys()) {
+            if (id !== state.activeFileId) return id;
+        }
+        return null;
+    }
+
+    function updateSplitPaneFocusStyles() {
+        const primary = document.getElementById('editor-split-pane-primary');
+        const secondary = document.getElementById('editor-split-pane-secondary');
+        primary?.classList.toggle('focused-pane', state.focusedPane === 'primary');
+        secondary?.classList.toggle('focused-pane', state.splitActive && state.focusedPane === 'split');
+    }
+
+    function populateSplitFileSelect() {
+        const sel = document.getElementById('split-pane-file-select');
+        if (!sel) return;
+        const parts = [];
+        state.files.forEach((file, id) => {
+            const lang = file.language || resolveEditorLanguage(file, file.doc);
+            const label = `${fileBasename(file.name)} (${lang})`;
+            const selected = id === state.splitFileId ? ' selected' : '';
+            parts.push(`<option value="${id.replace(/"/g, '&quot;')}"${selected}>${escapeHtml(label)}</option>`);
+        });
+        sel.innerHTML = parts.join('');
+        if (state.splitFileId) sel.value = state.splitFileId;
+    }
+
+    function updateSplitLayout() {
+        const splitContainer = document.getElementById('editor-split-container');
+        const pane2 = document.getElementById('editor-split-pane-secondary');
+        if (splitContainer) splitContainer.classList.toggle('split-active', state.splitActive);
+        if (pane2) pane2.style.display = state.splitActive ? 'flex' : 'none';
+        populateSplitFileSelect();
+        updateSplitPaneFocusStyles();
+    }
+
+    function mountEditorInContainer(container, fileId) {
+        const file = state.files.get(fileId);
+        if (!file || !container) return null;
+        container.innerHTML = '';
+        const lang = resolveEditorLanguage(file, file.doc);
+        return createEditor(container, file.doc, lang, fileId);
+    }
+
+    function mountSplitEditor() {
+        if (!state.splitActive || !state.splitFileId) return;
+        const container2 = document.getElementById('editor-container-2');
+        if (!container2) return;
+        if (state.splitEditor) {
+            state.splitEditor.dispose();
+            state.splitEditor = null;
+        }
+        state.splitEditor = mountEditorInContainer(container2, state.splitFileId);
+        if (state.splitEditor) {
+            state.splitEditor.onDidFocusEditorWidget(() => {
+                state.focusedPane = 'split';
+                const file = state.files.get(state.splitFileId);
+                if (file) updateStatusbarLanguage(resolveEditorLanguage(file, file.doc));
+                updateSplitPaneFocusStyles();
+            });
+            if (state.userRole === 'viewer') {
+                state.splitEditor.updateOptions({ readOnly: true });
+            }
+        }
+        layoutMonacoEditors();
+    }
+
+    function enableEditorSplit() {
+        if (state.files.size < 2) {
+            showToast('Add at least two files to compare in split view. Alt+click a tab to open it on the right.', 'info');
+            return false;
+        }
+        state.splitActive = true;
+        if (!state.splitFileId || !state.files.has(state.splitFileId) || state.splitFileId === state.activeFileId) {
+            state.splitFileId = pickDefaultSplitFileId();
+        }
+        if (!state.splitFileId) {
+            state.splitActive = false;
+            showToast('No other file available for the right pane', 'info');
+            return false;
+        }
+        updateSplitLayout();
+        mountSplitEditor();
+        renderTabs();
+        return true;
+    }
+
+    function disableEditorSplit() {
+        if (state.splitEditor) {
+            state.splitEditor.dispose();
+            state.splitEditor = null;
+        }
+        state.splitActive = false;
+        state.splitFileId = null;
+        state.focusedPane = 'primary';
+        const container2 = document.getElementById('editor-container-2');
+        if (container2) container2.innerHTML = '';
+        updateSplitLayout();
+        renderTabs();
+    }
+
+    function applyLanguageToSplitEditor(lang) {
+        if (!state.splitEditor || !monacoLoaded) return;
+        monaco.editor.setModelLanguage(state.splitEditor.getModel(), mapLanguageToMonaco(lang));
+        renderFileTree();
+        renderTabs();
     }
 
     function hydrateFilesFromSessionPayload(sessionData) {
@@ -1813,7 +1964,7 @@
 
 
 
-    function createEditor(container, doc, language) {
+    function createEditor(container, doc, language, fileId) {
         const editor = monaco.editor.create(container, {
             value: doc,
             language: mapLanguageToMonaco(language),
@@ -1828,12 +1979,14 @@
 
         editor.onDidChangeModelContent((e) => {
             if (state.isApplyingRemote) return;
-            handleLocalChange(e);
-            updateStdinHintForCode(editor.getValue());
+            handleLocalChange(e, fileId, editor);
+            if (fileId === getFocusedFileId()) {
+                updateStdinHintForCode(editor.getValue());
+            }
         });
 
         editor.onDidChangeCursorSelection((e) => {
-            handleCursorUpdate(e);
+            handleCursorUpdate(e, fileId);
         });
 
         editor.onMouseDown((e) => {
@@ -1874,41 +2027,46 @@
     let localBatchTimer = null;
     const LOCAL_BATCH_MS = 30; // Buffer rapid edits for 30ms
 
-    function handleLocalChange(e) {
-        if (!state.socket || !state.currentSession) return;
+    function handleLocalChange(e, fileId, editor) {
+        if (!state.socket || !state.currentSession || !fileId) return;
 
-        const model = state.editorView.getModel();
+        const model = editor.getModel();
         if (!model) return;
 
         for (const change of e.changes) {
             const { rangeOffset, rangeLength, text } = change;
             if (rangeLength > 0) {
-                pendingLocalOps.push({ type: 'delete', pos: rangeOffset, count: rangeLength });
+                pendingLocalOps.push({ type: 'delete', pos: rangeOffset, count: rangeLength, fileId });
             }
             if (text && text.length > 0) {
-                pendingLocalOps.push({ type: 'insert', pos: rangeOffset, text });
+                pendingLocalOps.push({ type: 'insert', pos: rangeOffset, text, fileId });
             }
         }
 
         if (!localBatchTimer) {
             localBatchTimer = setTimeout(() => {
                 const opsToSend = pendingLocalOps.splice(0);
-                const file = state.files.get(state.activeFileId);
-                const currentVersion = file ? file.version : state.serverVersion;
-
-                opsToSend.forEach(op => {
-                    state.socket.emit('code-change', {
-                        sessionId: state.currentSession,
-                        fileId: state.activeFileId,
-                        op,
-                        version: currentVersion
-                    });
-                });
-
-                if (file && state.editorView) {
-                    file.doc = state.editorView.getValue();
+                const byFile = new Map();
+                for (const op of opsToSend) {
+                    const fid = op.fileId;
+                    if (!byFile.has(fid)) byFile.set(fid, []);
+                    byFile.get(fid).push(op);
                 }
-                scheduleLanguageReinferFromContent();
+                byFile.forEach((ops, fid) => {
+                    const file = state.files.get(fid);
+                    const currentVersion = file ? file.version : state.serverVersion;
+                    ops.forEach(op => {
+                        state.socket.emit('code-change', {
+                            sessionId: state.currentSession,
+                            fileId: fid,
+                            op: { type: op.type, pos: op.pos, count: op.count, text: op.text },
+                            version: currentVersion
+                        });
+                    });
+                    const ed = getEditorForFileId(fid);
+                    if (file && ed) file.doc = ed.getValue();
+                });
+                if (byFile.has(state.activeFileId)) scheduleLanguageReinferFromContent();
                 localBatchTimer = null;
             }, LOCAL_BATCH_MS);
         }
@@ -1925,54 +2083,58 @@
     let remoteBatchTimer = null;
     const REMOTE_BATCH_MS = 16; // ~1 frame at 60fps
 
-    function applyRemoteChange(op) {
-        if (!state.editorView) return;
+    function applyRemoteChange(op, fileId) {
+        const editor = getEditorForFileId(fileId);
+        if (!editor) return;
 
-        pendingRemoteOps.push(op);
+        pendingRemoteOps.push({ op, fileId });
 
         if (!remoteBatchTimer) {
             remoteBatchTimer = requestAnimationFrame(() => {
-                if (!state.editorView || pendingRemoteOps.length === 0) {
+                if (pendingRemoteOps.length === 0) {
                     remoteBatchTimer = null;
                     return;
                 }
 
                 state.isApplyingRemote = true;
                 try {
-                    const model = state.editorView.getModel();
-                    if (!model) return;
-
-                    const edits = [];
-                    for (const remoteOp of pendingRemoteOps) {
-                        const len = model.getValueLength();
-                        const pos = Math.min(remoteOp.pos, len);
-                        if (remoteOp.type === 'insert') {
-                            const start = model.getPositionAt(pos);
-                            edits.push({
-                                range: new monaco.Range(start.lineNumber, start.column, start.lineNumber, start.column),
-                                text: remoteOp.text
-                            });
-                        } else if (remoteOp.type === 'delete') {
-                            const from = model.getPositionAt(pos);
-                            const toPos = Math.min(pos + remoteOp.count, len);
-                            const to = model.getPositionAt(toPos);
-                            edits.push({
-                                range: new monaco.Range(from.lineNumber, from.column, to.lineNumber, to.column),
-                                text: ''
-                            });
+                    const batch = pendingRemoteOps.splice(0);
+                    const byFile = new Map();
+                    for (const item of batch) {
+                        if (!byFile.has(item.fileId)) byFile.set(item.fileId, []);
+                        byFile.get(item.fileId).push(item.op);
+                    }
+                    byFile.forEach((ops, fid) => {
+                        const ed = getEditorForFileId(fid);
+                        if (!ed) return;
+                        const model = ed.getModel();
+                        if (!model) return;
+                        const edits = [];
+                        for (const remoteOp of ops) {
+                            const len = model.getValueLength();
+                            const pos = Math.min(remoteOp.pos, len);
+                            if (remoteOp.type === 'insert') {
+                                const start = model.getPositionAt(pos);
+                                edits.push({
+                                    range: new monaco.Range(start.lineNumber, start.column, start.lineNumber, start.column),
+                                    text: remoteOp.text
+                                });
+                            } else if (remoteOp.type === 'delete') {
+                                const from = model.getPositionAt(pos);
+                                const toPos = Math.min(pos + remoteOp.count, len);
+                                const to = model.getPositionAt(toPos);
+                                edits.push({
+                                    range: new monaco.Range(from.lineNumber, from.column, to.lineNumber, to.column),
+                                    text: ''
+                                });
+                            }
                         }
-                    }
-                    if (edits.length > 0) {
-                        state.editorView.executeEdits('remote', edits);
-                    }
-
-                    if (state.activeFileId) {
-                        const file = state.files.get(state.activeFileId);
-                        if (file) file.doc = state.editorView.getValue();
-                    }
+                        if (edits.length > 0) ed.executeEdits('remote', edits);
+                        const file = state.files.get(fid);
+                        if (file) file.doc = ed.getValue();
+                    });
                 } finally {
                     state.isApplyingRemote = false;
-                    pendingRemoteOps = [];
                     remoteBatchTimer = null;
                 }
             });
@@ -1981,14 +2143,17 @@
 
     // ─── Cursor Broadcasting ───
     let cursorTimer = null;
-    function handleCursorUpdate(e) {
-        if (!state.socket || !state.currentSession || !state.activeFileId) return;
+    function handleCursorUpdate(e, fileId) {
+        if (!state.socket || !state.currentSession || !fileId) return;
+        if (fileId !== getFocusedFileId()) return;
+        const editor = getEditorForFileId(fileId);
+        if (!editor) return;
         clearTimeout(cursorTimer);
         cursorTimer = setTimeout(() => {
-            const selection = state.editorView.getSelection();
+            const selection = editor.getSelection();
             if (!selection) return;
 
-            const model = state.editorView.getModel();
+            const model = editor.getModel();
             if (!model) return;
 
             const headOffset = model.getOffsetAt({ lineNumber: selection.positionLineNumber, column: selection.positionColumn });
@@ -1997,7 +2162,7 @@
 
             state.socket.emit('cursor-update', {
                 sessionId: state.currentSession,
-                fileId: state.activeFileId,
+                fileId,
                 cursor: { line: selection.positionLineNumber, ch: selection.positionColumn },
                 selection: { from: fromOffset, to: toOffset, head: headOffset }
             });
@@ -2027,6 +2192,7 @@
         }
         setSaveStatus('saving');
         try {
+            syncAllOpenEditorsToFiles();
             const files = Array.from(state.files.entries()).map(([id, f]) => ({
                 id,
                 name: f.name,
@@ -2249,11 +2415,21 @@
             renderFileTree();
             renderTabs();
             
+            if (state.splitFileId === data.fileId) {
+                if (state.files.size < 2) disableEditorSplit();
+                else {
+                    const next = pickDefaultSplitFileId();
+                    if (next) {
+                        state.splitFileId = next;
+                        mountSplitEditor();
+                    } else disableEditorSplit();
+                }
+            }
             if (state.activeFileId === data.fileId) {
                 if (state.openTabs.size > 0) {
-                    openFile(Array.from(state.openTabs)[0]);
+                    openFileInPrimary(Array.from(state.openTabs)[0]);
                 } else if (state.files.size > 0) {
-                    openFile(Array.from(state.files.keys())[0]);
+                    openFileInPrimary(Array.from(state.files.keys())[0]);
                 } else {
                     state.activeFileId = null;
                     document.getElementById('editor-container').innerHTML = '';
@@ -2261,6 +2437,7 @@
                         state.editorView.dispose();
                         state.editorView = null;
                     }
+                    disableEditorSplit();
                 }
             }
         });
@@ -2323,8 +2500,8 @@
             if (file) {
                 file.version = version;
                 // If it's the active file, apply to editor
-                if (fileId === state.activeFileId) {
-                    applyRemoteChange(op);
+                if (fileId === state.activeFileId || fileId === state.splitFileId) {
+                    applyRemoteChange(op, fileId);
                 } else {
                     // Just update the doc in memory
                     // (A full OT implementation would maintain history per file here too)
@@ -2378,6 +2555,9 @@
                 if (fileId === state.activeFileId) {
                     updateStatusbarLanguage(language);
                     applyLanguageToActiveEditor(language);
+                } else if (fileId === state.splitFileId) {
+                    applyLanguageToSplitEditor(language);
+                    if (state.focusedPane === 'split') updateStatusbarLanguage(language);
                 } else {
                     renderFileTree();
                     renderTabs();
@@ -2485,21 +2665,26 @@
 
     // ─── User-initiated language change (emits to server) ───
     function reconfigureLanguage(lang) {
-        if (!state.editorView || !monacoLoaded) return;
+        const fileId = getFocusedFileId();
+        const editor = getFocusedEditor();
+        if (!editor || !monacoLoaded || !fileId) return;
 
-        if (state.socket && state.currentSession && state.activeFileId) {
+        if (state.socket && state.currentSession) {
             state.socket.emit('language-change', {
                 sessionId: state.currentSession,
-                fileId: state.activeFileId,
+                fileId,
                 language: lang
             });
-            const file = state.files.get(state.activeFileId);
-            if (file) {
-                file.language = lang;
-            }
+            const file = state.files.get(fileId);
+            if (file) file.language = lang;
         }
 
-        applyLanguageToActiveEditor(lang);
+        if (fileId === state.activeFileId) {
+            applyLanguageToActiveEditor(lang);
+        } else if (fileId === state.splitFileId) {
+            applyLanguageToSplitEditor(lang);
+            updateStatusbarLanguage(lang);
+        }
     }
 
     // ─── File Tree (nested folders from path names, e.g. routes/auth.js) ───
@@ -2616,7 +2801,7 @@
         }
         const row = e.target.closest('.file-item[data-file-id]');
         if (row && row.dataset.fileId) {
-            window.openFile(row.dataset.fileId);
+            window.openFile(row.dataset.fileId, e);
         }
     }
 
@@ -2682,9 +2867,10 @@
             else if (lang === 'plaintext') { iconClass = 'codicon-file'; iconColor = '#6e7681'; }
 
             const isActive = id === state.activeFileId ? 'active' : '';
+            const inSplit = state.splitActive && id === state.splitFileId ? ' tab-in-split' : '';
             const tabLabel = fileBasename(file.name);
             html += `
-                <div class="editor-tab ${isActive}" draggable="true" data-file-id="${id}" onclick="openFile('${id}')">
+                <div class="editor-tab ${isActive}${inSplit}" draggable="true" data-file-id="${id}" onclick="openFile('${id}', event)" title="Alt+click to open in right pane">
                     <i class="codicon ${iconClass} tab-icon" style="color: ${iconColor}; margin-right: 6px;"></i>
                     <span class="tab-title" title="${escapeHtml(file.name)}">${escapeHtml(tabLabel)}</span>
                     <button class="btn btn-icon btn-xs tab-close" onclick="event.stopPropagation(); closeTab('${id}')" style="background:none;border:none;color:inherit;cursor:pointer;">
@@ -2697,34 +2883,37 @@
         tabsContainer.innerHTML = html;
     }
 
-    window.openFile = function(fileId) {
+    function openFileInPrimary(fileId) {
         if (!state.files.has(fileId)) return;
-        
+
         state.activeFileId = fileId;
         state.openTabs.add(fileId);
         syncTabOrder();
-        
+        state.focusedPane = 'primary';
+
         const file = state.files.get(fileId);
-        
         const container = document.getElementById('editor-container');
-        const container2 = document.getElementById('editor-container-2');
-        const splitContainer = document.getElementById('editor-split-container');
-        if (state.splitEditor) { state.splitEditor.dispose(); state.splitEditor = null; }
         if (state.editorView) state.editorView.dispose();
-        
-        container.innerHTML = '';
-        if (container2) { container2.innerHTML = ''; container2.style.display = state.splitActive ? '' : 'none'; }
-        if (splitContainer) splitContainer.classList.toggle('split-active', state.splitActive);
-        state.editorView = createEditor(container, file.doc, resolveEditorLanguage(file, file.doc));
-        if (state.splitActive && container2) {
-            const model = state.editorView.getModel();
-            if (model) state.splitEditor = monaco.editor.create(container2, { model, readOnly: state.userRole === 'viewer' });
+        state.editorView = mountEditorInContainer(container, fileId);
+        if (state.editorView) {
+            state.editorView.onDidFocusEditorWidget(() => {
+                state.focusedPane = 'primary';
+                updateStatusbarLanguage(resolveEditorLanguage(file, file.doc));
+                updateSplitPaneFocusStyles();
+            });
         }
-        
-        // If viewer, make editor read-only
-        if (state.userRole === 'viewer') {
-            setEditorReadOnly(true);
+
+        if (state.splitActive && state.splitFileId === fileId) {
+            const next = pickDefaultSplitFileId();
+            if (next) {
+                state.splitFileId = next;
+                mountSplitEditor();
+            } else {
+                disableEditorSplit();
+            }
         }
+
+        if (state.userRole === 'viewer') setEditorReadOnly(true);
 
         file.language = resolveEditorLanguage(file, file.doc);
         updateStatusbarLanguage(file.language);
@@ -2736,29 +2925,72 @@
         updateStdinHintForCode(file.doc);
         renderFileTree();
         renderTabs();
-        layoutMonacoEditor();
+        updateSplitLayout();
+        layoutMonacoEditors();
         updateRemoteSelections();
+        updateCommentGutter();
+    }
+
+    function openFileInSplit(fileId) {
+        if (!state.files.has(fileId)) return;
+        state.openTabs.add(fileId);
+        syncTabOrder();
+        state.splitFileId = fileId;
+        if (!state.splitActive) {
+            if (!enableEditorSplit()) return;
+        } else {
+            mountSplitEditor();
+            updateSplitLayout();
+        }
+        state.focusedPane = 'split';
+        const file = state.files.get(fileId);
+        if (file) updateStatusbarLanguage(resolveEditorLanguage(file, file.doc));
+        renderTabs();
+        updateSplitPaneFocusStyles();
+        state.splitEditor?.focus();
+    }
+
+    window.openFile = function(fileId, ev) {
+        if (!state.files.has(fileId)) return;
+        const openInSplit = ev && (ev.altKey || (ev.metaKey && ev.shiftKey));
+        if (openInSplit) {
+            openFileInSplit(fileId);
+            return;
+        }
+        openFileInPrimary(fileId);
     };
 
     window.closeTab = function(fileId) {
         state.openTabs.delete(fileId);
         state.tabOrder = state.tabOrder.filter((id) => id !== fileId);
         
+        if (state.splitFileId === fileId) {
+            if (state.files.size < 2) {
+                disableEditorSplit();
+            } else {
+                const next = pickDefaultSplitFileId();
+                if (next) {
+                    state.splitFileId = next;
+                    mountSplitEditor();
+                } else {
+                    disableEditorSplit();
+                }
+            }
+        }
+
         if (state.activeFileId === fileId) {
             if (state.openTabs.size > 0) {
-                openFile(Array.from(state.openTabs)[0]);
+                openFileInPrimary(Array.from(state.openTabs)[0]);
+            } else if (state.files.size > 0) {
+                openFileInPrimary(Array.from(state.files.keys())[0]);
             } else {
                 state.activeFileId = null;
                 document.getElementById('editor-container').innerHTML = '';
-                const c2 = document.getElementById('editor-container-2');
-                if (c2) { c2.innerHTML = ''; c2.style.display = 'none'; }
-                document.getElementById('editor-split-container')?.classList.remove('split-active');
-                if (state.splitEditor) { state.splitEditor.dispose(); state.splitEditor = null; }
                 if (state.editorView) { state.editorView.dispose(); state.editorView = null; }
-                state.splitActive = false;
+                disableEditorSplit();
             }
         }
-        
+
         renderTabs();
     };
 
@@ -2902,12 +3134,12 @@
 
     // ─── Set Editor Read-Only ───
     function setEditorReadOnly(readonly) {
-        if (!state.editorView) return;
+        if (state.editorView) state.editorView.updateOptions({ readOnly: readonly });
+        if (state.splitEditor) state.splitEditor.updateOptions({ readOnly: readonly });
 
-        state.editorView.updateOptions({ readOnly: readonly });
-
-        // Add/remove viewer overlay
+        // Add/remove viewer overlay (primary pane only)
         const container = document.getElementById('editor-container');
+        if (!container) return;
         const existing = container.querySelector('.viewer-overlay');
         if (readonly && !existing) {
             const overlay = document.createElement('div');
@@ -3101,10 +3333,9 @@
         const backBtn = document.getElementById('back-to-dashboard');
         backBtn.addEventListener('click', () => {
             if (state.socket) { state.socket.disconnect(); state.socket = null; }
-            if (state.splitEditor) { state.splitEditor.dispose(); state.splitEditor = null; }
+            disableEditorSplit();
             if (state.editorView) { state.editorView.dispose(); state.editorView = null; }
             if (state.terminal) { state.terminal.dispose(); state.terminal = null; }
-            state.splitActive = false;
             state.currentSession = null;
             state.users.clear();
             const up = document.getElementById('unified-panel');
@@ -3374,23 +3605,15 @@
         // ─── Split Editor ───
         document.getElementById('split-editor-btn')?.addEventListener('click', () => {
             if (!state.editorView) return;
-            const container2 = document.getElementById('editor-container-2');
-            const splitContainer = document.getElementById('editor-split-container');
-            if (!container2 || !splitContainer) return;
-            if (state.splitActive && state.splitEditor) {
-                state.splitEditor.dispose();
-                state.splitEditor = null;
-                state.splitActive = false;
-                if (container2) container2.style.display = 'none';
-                if (splitContainer) splitContainer.classList.remove('split-active');
-            } else {
-                const model = state.editorView.getModel();
-                if (!model) return;
-                if (container2) container2.style.display = '';
-                if (splitContainer) splitContainer.classList.add('split-active');
-                state.splitEditor = monaco.editor.create(container2, { model, readOnly: state.userRole === 'viewer' });
-                state.splitActive = true;
-            }
+            if (state.splitActive) disableEditorSplit();
+            else enableEditorSplit();
+        });
+        document.getElementById('close-split-pane-btn')?.addEventListener('click', () => {
+            disableEditorSplit();
+        });
+        document.getElementById('split-pane-file-select')?.addEventListener('change', (e) => {
+            const fileId = e.target.value;
+            if (fileId && state.files.has(fileId)) openFileInSplit(fileId);
         });
 
         // ─── Panel Tab Switching ───
@@ -3446,10 +3669,12 @@
 
     // ─── Code Execution ───
     async function runCode() {
-        if (!state.editorView) return;
+        const editor = getFocusedEditor();
+        const fileId = getFocusedFileId();
+        if (!editor || !fileId) return;
 
-        const code = state.editorView.getValue();
-        const active = state.activeFileId && state.files.get(state.activeFileId);
+        const code = editor.getValue();
+        const active = state.files.get(fileId);
         const language = active
             ? resolveEditorLanguage(active, code)
             : 'plaintext';

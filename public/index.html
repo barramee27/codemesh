@@ -750,7 +750,7 @@
             <button class="vscode-action-btn" id="download-active-file-btn" title="Download active file (extension from language)">
               <i class="codicon codicon-cloud-download"></i>
             </button>
-            <button class="vscode-action-btn" id="split-editor-btn" title="Split Editor Right">
+            <button class="vscode-action-btn" id="split-editor-btn" title="Split editor — right pane can show another file (Alt+click a tab)">
               <i class="codicon codicon-split-horizontal"></i>
             </button>
             <button class="vscode-action-btn" id="copy-session-link" title="Copy Invite Link">
@@ -767,8 +767,19 @@
 
         <div class="editor-content-wrapper" id="editor-wrapper">
           <div id="editor-split-container" class="editor-split-container">
-            <div id="editor-container" class="editor-container"></div>
-            <div id="editor-container-2" class="editor-container editor-split-second" style="display:none;"></div>
+            <div class="editor-split-pane editor-split-pane-primary" id="editor-split-pane-primary" data-pane="primary">
+              <div id="editor-container" class="editor-container"></div>
+            </div>
+            <div class="editor-split-pane editor-split-pane-secondary" id="editor-split-pane-secondary" data-pane="split" style="display:none;">
+              <div class="split-pane-bar" id="split-pane-bar-secondary">
+                <span class="split-pane-bar-label">Right pane</span>
+                <select id="split-pane-file-select" class="split-pane-file-select" title="Choose file for right pane"></select>
+                <button type="button" class="btn btn-icon btn-xs split-pane-close-btn" id="close-split-pane-btn" title="Close split">
+                  <i class="codicon codicon-close"></i>
+                </button>
+              </div>
+              <div id="editor-container-2" class="editor-container editor-split-second"></div>
+            </div>
           </div>
           <div id="comments-sidebar" class="comments-sidebar" style="display:none;">
             <div class="comments-header">
