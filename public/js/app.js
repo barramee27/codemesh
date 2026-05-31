@@ -3720,6 +3720,12 @@
             downloadSplitScratch();
         });
         document.getElementById('run-stdin-split-input')?.addEventListener('input', persistSplitStdin);
+        document.getElementById('split-pane-clear-output-btn')?.addEventListener('click', () => {
+            const out = document.getElementById('split-pane-output');
+            const time = document.getElementById('split-pane-exec-time');
+            if (out) out.innerHTML = '';
+            if (time) time.textContent = '';
+        });
 
         // ─── Panel Tab Switching ───
         document.querySelectorAll('#panel-tabs .vscode-panel-tab').forEach(tab => {
@@ -3825,19 +3831,23 @@
         }
 
         updateStdinHintForCode(code, pane);
-        ensureRunPanelVisible();
+        if (!isSplitRun) ensureRunPanelVisible();
         const stdin = getRunStdin(pane);
         if (codeNeedsStdin(code) && !stdin.trim()) {
             const where = isSplitRun
-                ? 'Add input in the stdin box under the right pane, then Run again.'
+                ? 'Add input in the stdin box above, then Run again.'
                 : 'Add input in the OUTPUT panel below, then Run again.';
             showToast(`This program reads stdin (cin, scanf, input…). ${where}`, 'info');
             if (isSplitRun) document.getElementById('run-stdin-split-input')?.focus();
             else document.getElementById('run-stdin-input')?.focus();
         }
 
-        const outputContent = document.getElementById('output-content');
-        const execTimeEl = document.getElementById('exec-time');
+        const outputContent = isSplitRun
+            ? document.getElementById('split-pane-output')
+            : document.getElementById('output-content');
+        const execTimeEl = isSplitRun
+            ? document.getElementById('split-pane-exec-time')
+            : document.getElementById('exec-time');
         runBtn?.classList.add('running');
         splitRunBtn?.classList.add('running');
         const runBtnSpan = runBtn?.querySelector('span');
@@ -3845,7 +3855,7 @@
         if (outputContent) {
             outputContent.innerHTML = `<span class="output-info">⏳ Running ${escapeHtml(runLabel)} (${escapeHtml(language)})…</span>`;
         }
-        execTimeEl.textContent = '';
+        if (execTimeEl) execTimeEl.textContent = '';
 
         if (isSplitRun) persistSplitStdin();
         else persistRunStdin();
@@ -3879,12 +3889,14 @@
                 html += `\n<span class="output-info">Exit code: ${result.exitCode}</span>`;
             }
 
-            outputContent.innerHTML = html;
-            execTimeEl.textContent = result.execTime ? `${result.execTime}ms` : '';
+            if (outputContent) outputContent.innerHTML = html;
+            if (execTimeEl) execTimeEl.textContent = result.execTime ? `${result.execTime}ms` : '';
 
         } catch (err) {
-            outputContent.innerHTML = `<span class="output-error">Error: ${escapeHtml(err.message)}</span>`;
-            execTimeEl.textContent = '';
+            if (outputContent) {
+                outputContent.innerHTML = `<span class="output-error">Error: ${escapeHtml(err.message)}</span>`;
+            }
+            if (execTimeEl) execTimeEl.textContent = '';
         } finally {
             runBtn?.classList.remove('running');
             splitRunBtn?.classList.remove('running');
