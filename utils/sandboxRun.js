@@ -12,6 +12,17 @@ const { v4: uuidv4 } = require('uuid');
 const DEFAULT_TIMEOUT_MS = 10000;
 const MAX_OUTPUT = 50000;
 
+/** UTF-8 locale for sandboxed programs (Thai, CJK, emoji in stdin/stdout/source). */
+const SANDBOX_ENV = {
+    ...process.env,
+    LANG: 'C.UTF-8',
+    LC_ALL: 'C.UTF-8',
+    LC_CTYPE: 'C.UTF-8',
+    PYTHONIOENCODING: 'utf-8',
+    PYTHONUTF8: '1',
+    NODE_ENV: 'sandbox'
+};
+
 const RUNNERS = {
     javascript: {
         ext: '.js',
@@ -28,12 +39,12 @@ const RUNNERS = {
     },
     cpp: {
         ext: '.cpp',
-        compile: (file, out) => ['g++', ['-o', out, file, '-std=gnu++17']],
+        compile: (file, out) => ['g++', ['-o', out, file, '-std=gnu++17', '-finput-charset=UTF-8', '-fexec-charset=UTF-8']],
         cmd: (file, out) => [out, []]
     },
     java: {
         ext: '.java',
-        compile: (file, out) => ['javac', [file]],
+        compile: (file, out) => ['javac', ['-encoding', 'UTF-8', file]],
         cmd: (file, out) => {
             const dir = path.dirname(file);
             const className = path.basename(file, '.java');
@@ -78,11 +89,11 @@ function runProcess(command, args, timeoutMs, stdinData) {
         const proc = spawn(command, args, {
             timeout: timeoutMs,
             stdio: ['pipe', 'pipe', 'pipe'],
-            env: { ...process.env, NODE_ENV: 'sandbox' }
+            env: SANDBOX_ENV
         });
 
         proc.stdout.on('data', (data) => {
-            stdout += data.toString();
+            stdout += data.toString('utf8');
             if (stdout.length > MAX_OUTPUT) {
                 stdout = stdout.slice(0, MAX_OUTPUT) + '\n... [output truncated]';
                 proc.kill();
@@ -91,7 +102,7 @@ function runProcess(command, args, timeoutMs, stdinData) {
         });
 
         proc.stderr.on('data', (data) => {
-            stderr += data.toString();
+            stderr += data.toString('utf8');
             if (stderr.length > MAX_OUTPUT) {
                 stderr = stderr.slice(0, MAX_OUTPUT) + '\n... [output truncated]';
                 proc.kill();
@@ -151,7 +162,7 @@ async function executeCodeWithStdin({ code, language, stdin, timeLimitMs = DEFAU
             processedCode = `public class Main {\n${code}\n}`;
         }
 
-        await fs.writeFile(filePath, processedCode);
+        await fs.writeFile(filePath, processedCode, 'utf8');
 
         if (runner.compile) {
             const [compCmd, compArgs] = runner.compile(filePath, outPath);

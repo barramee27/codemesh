@@ -61,11 +61,17 @@ router.post('/exec', authMiddleware, (req, res) => {
         });
     }
     
-    exec(command, { 
-        timeout: TIMEOUT_MS, 
+    exec(command, {
+        timeout: TIMEOUT_MS,
         maxBuffer: 50000,
-        // Run in a restricted environment
-        env: { ...process.env, PATH: '/usr/local/bin:/usr/bin:/bin' }
+        encoding: 'utf8',
+        env: {
+            ...process.env,
+            LANG: 'C.UTF-8',
+            LC_ALL: 'C.UTF-8',
+            LC_CTYPE: 'C.UTF-8',
+            PATH: '/usr/local/bin:/usr/bin:/bin'
+        }
     }, (err, stdout, stderr) => {
         if (err && err.killed) {
             return res.json({ output: (stdout || '') + (stderr || ''), error: 'Timed out' });

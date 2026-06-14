@@ -46,13 +46,25 @@ const allowedOrigins = process.env.ALLOWED_ORIGINS
 app.use(cors({ origin: allowedOrigins }));
 app.use(express.json({ limit: '52mb' }));
 
+// Ensure JSON API responses declare UTF-8 (Thai, CJK, emoji in code/comments)
+app.use('/api', (req, res, next) => {
+    const origJson = res.json.bind(res);
+    res.json = (body) => {
+        res.setHeader('Content-Type', 'application/json; charset=utf-8');
+        return origJson(body);
+    };
+    next();
+});
+
 // index.html + app.js: no-cache so deploys are visible immediately (avoids blank/stale admin panels)
 app.get(['/', '/index.html'], (req, res) => {
     res.set('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.set('Content-Type', 'text/html; charset=utf-8');
     res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 app.get('/js/app.js', (req, res) => {
     res.set('Cache-Control', 'no-cache, must-revalidate');
+    res.set('Content-Type', 'application/javascript; charset=utf-8');
     res.sendFile(path.join(__dirname, 'public', 'js', 'app.js'));
 });
 

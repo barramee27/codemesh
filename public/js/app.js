@@ -47,6 +47,7 @@
     let xtermCtorCached = null;
 
     const SPLIT_SCRATCH_ID = '__split_test__';
+    const EDITOR_FONT_FAMILY = "'JetBrains Mono', 'Noto Sans Mono', 'Noto Sans Thai', 'Sarabun', 'Courier New', monospace";
     const SPLIT_LANG_OPTIONS = [
         ['python', 'Python'],
         ['cpp', 'C++'],
@@ -1425,7 +1426,7 @@
             const r = new FileReader();
             r.onload = () => resolve(r.result);
             r.onerror = () => reject(r.error || new Error('Failed to read file'));
-            r.readAsText(file);
+            r.readAsText(file, 'UTF-8');
         });
     }
 
@@ -2092,6 +2093,8 @@
             value: doc,
             language: mapLanguageToMonaco(language),
             theme: 'vs-dark',
+            fontFamily: EDITOR_FONT_FAMILY,
+            fontLigatures: false,
             automaticLayout: true,
             glyphMargin: true,
             readOnly: state.userRole === 'viewer',
@@ -4316,6 +4319,8 @@
                 value: ta.value || '',
                 language: mapLanguageToMonaco(lang),
                 theme: 'vs-dark',
+                fontFamily: EDITOR_FONT_FAMILY,
+                fontLigatures: false,
                 automaticLayout: true,
                 minimap: { enabled: false },
                 wordWrap: 'on'

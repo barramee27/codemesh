@@ -75,8 +75,8 @@
   --radius-xl: 24px;
 
   /* Typography */
-  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-  --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+  --font-sans: 'Inter', 'Noto Sans Thai', 'Sarabun', system-ui, -apple-system, sans-serif;
+  --font-mono: 'JetBrains Mono', 'Noto Sans Mono', 'Noto Sans Thai', 'Sarabun', ui-monospace, monospace;
 
   /* Transitions */
   --ease: cubic-bezier(0.4, 0, 0.2, 1);
