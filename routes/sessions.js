@@ -23,6 +23,7 @@ const {
     isValidSessionId,
     normalizeUtf8Text
 } = require('../utils/utf8');
+const { referencePdfForClient } = require('../utils/sessionPdf');
 
 const UPLOADS_DIR = path.join(__dirname, '..', 'uploads');
 if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true });
@@ -57,11 +58,7 @@ function sessionCanEdit(session, userId, isAdmin) {
 }
 
 function referencePdfPayload(session) {
-    if (!session.referencePdf || !session.referencePdf.storageName) return null;
-    return {
-        url: `/uploads/${session.referencePdf.storageName}`,
-        originalName: normalizeUtf8Text(session.referencePdf.originalName) || 'reference.pdf'
-    };
+    return referencePdfForClient(session);
 }
 
 function attachSessionMeta(session) {

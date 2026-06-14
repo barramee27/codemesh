@@ -2,6 +2,7 @@ const Session = require('../models/Session');
 const User = require('../models/User');
 const { transformOp, applyOp } = require('../utils/ot');
 const { ensureSessionAccess } = require('../utils/sessionAccess');
+const { referencePdfForClient } = require('../utils/sessionPdf');
 
 // In-memory state for active sessions
 const activeSessions = new Map();
@@ -301,12 +302,7 @@ module.exports = function setupCollaboration(io) {
             }
             if (dbSession) {
                 defaultJoinRole = dbSession.defaultJoinRole === 'viewer' ? 'viewer' : 'editor';
-                if (dbSession.referencePdf && dbSession.referencePdf.storageName) {
-                    referencePdf = {
-                        url: `/uploads/${dbSession.referencePdf.storageName}`,
-                        originalName: dbSession.referencePdf.originalName || 'reference.pdf'
-                    };
-                }
+                referencePdf = referencePdfForClient(dbSession);
             }
 
             // Send current state to joining client
@@ -317,7 +313,8 @@ module.exports = function setupCollaboration(io) {
                 comments: state.comments,
                 chatMessages: state.chatMessages || [],
                 defaultJoinRole,
-                referencePdf
+                referencePdf,
+                pdfSplitVisible: !!referencePdf
             });
 
             // Notify others
@@ -686,12 +683,7 @@ module.exports = function setupCollaboration(io) {
                 const dbSession = await Session.findOne({ sessionId });
                 if (dbSession) {
                     defaultJoinRole = dbSession.defaultJoinRole === 'viewer' ? 'viewer' : 'editor';
-                    if (dbSession.referencePdf && dbSession.referencePdf.storageName) {
-                        referencePdf = {
-                            url: `/uploads/${dbSession.referencePdf.storageName}`,
-                            originalName: dbSession.referencePdf.originalName || 'reference.pdf'
-                        };
-                    }
+                    referencePdf = referencePdfForClient(dbSession);
                 }
             } catch (err) { /* ignore */ }
             socket.emit('session-state', {
@@ -701,7 +693,8 @@ module.exports = function setupCollaboration(io) {
                 comments: state.comments,
                 chatMessages: state.chatMessages || [],
                 defaultJoinRole,
-                referencePdf
+                referencePdf,
+                pdfSplitVisible: !!referencePdf
             });
         });
 

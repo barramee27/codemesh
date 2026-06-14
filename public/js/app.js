@@ -1369,7 +1369,13 @@
             state.referencePdf = meta.referencePdf
                 ? normalizeReferencePdf({ referencePdf: meta.referencePdf })
                 : null;
-            if (!state.referencePdf) state.pdfSplitVisible = false;
+            if (!state.referencePdf) {
+                state.pdfSplitVisible = false;
+            } else if (meta.pdfSplitVisible !== undefined) {
+                state.pdfSplitVisible = !!meta.pdfSplitVisible;
+            } else {
+                state.pdfSplitVisible = true;
+            }
         }
         if (meta.owner) {
             const o = meta.owner;
@@ -2641,7 +2647,8 @@
 
             applySessionMeta({
                 defaultJoinRole: sessionData.defaultJoinRole,
-                referencePdf: normalizeReferencePdf(sessionData),
+                referencePdf: sessionData.referencePdf,
+                pdfSplitVisible: sessionData.referencePdf ? true : false,
                 owner: sessionData.owner,
                 isPublic: sessionData.isPublic,
                 hasClassKey: sessionData.hasClassKey
@@ -2690,7 +2697,8 @@
             updateRoleBadge(state.userRole);
             applySessionMeta({
                 defaultJoinRole: data.defaultJoinRole,
-                referencePdf: data.referencePdf
+                referencePdf: data.referencePdf,
+                pdfSplitVisible: data.pdfSplitVisible
             });
 
             if (data.comments) {

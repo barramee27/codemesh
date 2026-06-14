@@ -1,4 +1,5 @@
 const bcrypt = require('bcryptjs');
+const { referencePdfForClient } = require('./sessionPdf');
 
 const CLASS_KEY_MIN = 4;
 const CLASS_KEY_MAX = 64;
@@ -72,6 +73,7 @@ function sanitizeSessionForClient(session) {
     delete obj.classKeyHash;
     obj.requiresClassKey = session.isPublic === false;
     obj.hasClassKey = !!session.classKeyHash;
+    obj.referencePdf = referencePdfForClient(session);
     return obj;
 }
 
