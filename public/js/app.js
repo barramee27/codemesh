@@ -671,6 +671,152 @@
         });
     }
 
+    const PANE_RESIZER_KEYS = {
+        pdfCode: 'codemesh_pdf_pane_ratio',
+        editorSplit: 'codemesh_editor_split_ratio'
+    };
+
+    let pdfCodeResizer = null;
+    let editorSplitResizer = null;
+
+    function resetPaneFlexStyles(pane) {
+        if (!pane) return;
+        pane.style.flex = '';
+        pane.style.width = '';
+        pane.style.maxWidth = '';
+        pane.style.minWidth = '';
+    }
+
+    function createHorizontalPaneResizer(options) {
+        const {
+            splitter,
+            container,
+            primaryPane,
+            secondaryPane,
+            storageKey,
+            defaultRatio = 0.5,
+            minRatio = 0.12,
+            maxRatio = 0.88,
+            autoApply = true
+        } = options;
+        if (!splitter || !container || !primaryPane || !secondaryPane) return null;
+        if (splitter.dataset.bound === '1') {
+            return { apply: splitter._paneApply, reapply: splitter._paneReapply };
+        }
+
+        let ratio = defaultRatio;
+        try {
+            const saved = parseFloat(sessionStorage.getItem(storageKey));
+            if (Number.isFinite(saved) && saved >= minRatio && saved <= maxRatio) ratio = saved;
+        } catch (_) { /* ignore */ }
+
+        const apply = (nextRatio) => {
+            ratio = Math.max(minRatio, Math.min(maxRatio, nextRatio));
+            const pct = `${(ratio * 100).toFixed(2)}%`;
+            primaryPane.style.flex = `0 0 ${pct}`;
+            primaryPane.style.width = pct;
+            primaryPane.style.maxWidth = 'none';
+            secondaryPane.style.flex = '1 1 0';
+            secondaryPane.style.minWidth = '0';
+            try { sessionStorage.setItem(storageKey, String(ratio)); } catch (_) { /* quota */ }
+        };
+
+        const reapply = () => apply(ratio);
+
+        splitter._paneApply = apply;
+        splitter._paneReapply = reapply;
+        splitter.dataset.bound = '1';
+
+        const onPointerDown = (e) => {
+            if (e.pointerType === 'mouse' && e.button !== 0) return;
+            e.preventDefault();
+            e.stopPropagation();
+            try { splitter.setPointerCapture(e.pointerId); } catch (_) { /* ignore */ }
+            splitter.classList.add('pane-splitter-dragging');
+            document.body.classList.add('pane-resize-active');
+
+            const onPointerMove = (ev) => {
+                const rect = container.getBoundingClientRect();
+                if (rect.width <= 0) return;
+                apply((ev.clientX - rect.left) / rect.width);
+            };
+            const onPointerUp = (ev) => {
+                try { splitter.releasePointerCapture(ev.pointerId); } catch (_) { /* ignore */ }
+                splitter.classList.remove('pane-splitter-dragging');
+                document.body.classList.remove('pane-resize-active');
+                splitter.removeEventListener('pointermove', onPointerMove);
+                splitter.removeEventListener('pointerup', onPointerUp);
+                splitter.removeEventListener('pointercancel', onPointerUp);
+                layoutMonacoEditors();
+            };
+            splitter.addEventListener('pointermove', onPointerMove);
+            splitter.addEventListener('pointerup', onPointerUp);
+            splitter.addEventListener('pointercancel', onPointerUp);
+            onPointerMove(e);
+        };
+
+        splitter.addEventListener('pointerdown', onPointerDown);
+
+        splitter.addEventListener('dblclick', (e) => {
+            e.preventDefault();
+            apply(defaultRatio);
+            layoutMonacoEditors();
+        });
+
+        if (autoApply) apply(ratio);
+        return { apply, reapply };
+    }
+
+    function initPaneResizers() {
+        const pdfSplitter = document.getElementById('pdf-code-splitter');
+        const editorLayout = document.getElementById('editor-layout-split');
+        const pdfPane = document.getElementById('pdf-split-pane');
+        const codePane = document.getElementById('editor-code-pane');
+        if (pdfSplitter && editorLayout && pdfPane && codePane) {
+            pdfCodeResizer = createHorizontalPaneResizer({
+                splitter: pdfSplitter,
+                container: editorLayout,
+                primaryPane: pdfPane,
+                secondaryPane: codePane,
+                storageKey: PANE_RESIZER_KEYS.pdfCode,
+                defaultRatio: 0.38,
+                minRatio: 0.15,
+                maxRatio: 0.75,
+                autoApply: false
+            });
+        }
+
+        const editorSplitter = document.getElementById('editor-code-split-splitter');
+        const splitContainer = document.getElementById('editor-split-container');
+        const primaryPane = document.getElementById('editor-split-pane-primary');
+        const secondaryPane = document.getElementById('editor-split-pane-secondary');
+        if (editorSplitter && splitContainer && primaryPane && secondaryPane) {
+            editorSplitResizer = createHorizontalPaneResizer({
+                splitter: editorSplitter,
+                container: splitContainer,
+                primaryPane,
+                secondaryPane,
+                storageKey: PANE_RESIZER_KEYS.editorSplit,
+                defaultRatio: 0.5,
+                minRatio: 0.2,
+                maxRatio: 0.8,
+                autoApply: false
+            });
+        }
+    }
+
+    function ensurePaneResizers() {
+        if (!pdfCodeResizer || !editorSplitResizer) initPaneResizers();
+    }
+
+    function syncPdfCodeSplitterVisibility() {
+        if (pdfCodeResizer) pdfCodeResizer.reapply();
+    }
+
+    function syncEditorCodeSplitterVisibility() {
+        if (state.splitActive && editorSplitResizer) editorSplitResizer.reapply();
+    }
+
     function syncFileDocFromEditor(fileId, editor) {
         if (!fileId || !editor) return;
         const file = state.files.get(fileId);
@@ -804,8 +950,16 @@
     function updateSplitLayout() {
         const splitContainer = document.getElementById('editor-split-container');
         const pane2 = document.getElementById('editor-split-pane-secondary');
+        const pane1 = document.getElementById('editor-split-pane-primary');
         if (splitContainer) splitContainer.classList.toggle('split-active', state.splitActive);
         if (pane2) pane2.style.display = state.splitActive ? 'flex' : 'none';
+        syncEditorCodeSplitterVisibility();
+        if (state.splitActive && editorSplitResizer) {
+            editorSplitResizer.reapply();
+        } else if (!state.splitActive) {
+            resetPaneFlexStyles(pane1);
+            resetPaneFlexStyles(pane2);
+        }
         populateSplitLangSelect();
         updateSplitPaneUI();
         updateSplitPaneFocusStyles();
@@ -1184,8 +1338,12 @@
             clearSessionPdfView();
         }
         const showSplit = hasPdf && state.pdfSplitVisible;
-        pane.style.display = showSplit ? '' : 'none';
         layout.classList.toggle('pdf-split-active', showSplit);
+        ensurePaneResizers();
+        if (showSplit) {
+            syncPdfCodeSplitterVisibility();
+            layoutMonacoEditors();
+        }
     }
 
     function normalizeReferencePdf(sessOrPdf) {
@@ -5181,6 +5339,7 @@
         initAuth();
         initResetPassword();
         initDashboard();
+        initPaneResizers();
         initEditorToolbar();
         initAdminPanel();
         initPublishViewControls();

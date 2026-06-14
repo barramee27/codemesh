@@ -1169,7 +1169,71 @@ select.input-full {
 .editor-split-container.split-active .editor-split-pane-secondary {
   flex: 1;
   min-width: 0;
-  border-left: 1px solid var(--vscode-panel-border, #454545);
+  border-left: none;
+}
+
+.pane-splitter {
+  flex: 0 0 10px;
+  width: 10px;
+  min-width: 10px;
+  align-self: stretch;
+  cursor: col-resize;
+  position: relative;
+  z-index: 6;
+  touch-action: none;
+  background: transparent;
+  flex-shrink: 0;
+}
+
+.pane-splitter-overlay {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 10px;
+  min-width: 10px;
+  flex: none;
+  z-index: 20;
+}
+
+#pdf-code-splitter,
+#editor-code-split-splitter {
+  display: none;
+}
+
+.editor-layout-split.pdf-split-active #pdf-code-splitter {
+  display: block;
+}
+
+.editor-split-container.split-active #editor-code-split-splitter {
+  display: block;
+}
+
+.pane-splitter::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 1px;
+  transform: translateX(-50%);
+  background: var(--vscode-panel-border, #454545);
+  transition: background 0.12s ease, width 0.12s ease;
+}
+
+.pane-splitter:hover::after,
+.pane-splitter.pane-splitter-dragging::after {
+  width: 3px;
+  background: var(--accent-primary, #6c5ce7);
+}
+
+body.pane-resize-active {
+  cursor: col-resize !important;
+  user-select: none !important;
+}
+
+body.pane-resize-active * {
+  cursor: col-resize !important;
 }
 
 .editor-split-pane.focused-pane .editor-container {
@@ -3637,11 +3701,12 @@ select.input-full {
 .pdf-split-pane {
   display: none;
   flex-direction: column;
-  width: 42%;
-  min-width: 240px;
-  max-width: 55%;
-  border-right: 1px solid var(--vscode-border);
+  flex: 0 0 38%;
+  width: 38%;
+  min-width: 160px;
   background: var(--vscode-editor-bg);
+  position: relative;
+  overflow: visible;
 }
 
 .pdf-split-header {
@@ -3681,8 +3746,6 @@ select.input-full {
   min-height: 0;
   border: none;
   background: #525252;
-}
-  background: #1e1e1e;
 }
 
 .editor-tab.tab-dragging {

@@ -731,7 +731,7 @@
       <!-- Editor Main Area -->
       <div class="editor-main" id="editor-main">
         <div id="editor-layout-split" class="editor-layout-split">
-          <aside id="pdf-split-pane" class="pdf-split-pane" style="display:none;">
+          <aside id="pdf-split-pane" class="pdf-split-pane">
             <div class="pdf-split-header">
               <span id="pdf-split-title">Reference PDF</span>
               <button type="button" class="btn btn-icon btn-xs" id="pdf-split-close" title="Hide PDF pane"><i class="codicon codicon-close"></i></button>
@@ -752,6 +752,8 @@
               </button>
             </div>
             <iframe id="session-pdf-viewer" class="session-pdf-viewer" title="Reference PDF"></iframe>
+            <div id="pdf-code-splitter" class="pane-splitter pane-splitter-vertical pane-splitter-overlay" role="separator"
+              aria-orientation="vertical" aria-label="Resize PDF and code panes" tabindex="0"></div>
           </aside>
           <div id="editor-code-pane" class="editor-code-pane">
         <div class="vscode-tabs-container">
@@ -785,6 +787,8 @@
             <div class="editor-split-pane editor-split-pane-primary" id="editor-split-pane-primary" data-pane="primary">
               <div id="editor-container" class="editor-container"></div>
             </div>
+            <div id="editor-code-split-splitter" class="pane-splitter pane-splitter-vertical" role="separator"
+              aria-orientation="vertical" aria-label="Resize left and right editors" tabindex="0"></div>
             <div class="editor-split-pane editor-split-pane-secondary" id="editor-split-pane-secondary" data-pane="split" style="display:none;">
               <div class="split-pane-bar" id="split-pane-bar-secondary">
                 <span class="split-pane-bar-label">Test</span>
