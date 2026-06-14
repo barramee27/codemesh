@@ -413,8 +413,61 @@
         return '/' + encodeURIComponent(sessionId);
     }
 
-    let pdfJsLoadPromise = null;
-    let sessionPdfRenderToken = 0;
+    /** Browser PDF viewer zoom (iframe hash); restored for native zoom/pen toolbar. */
+    let sessionPdfZoom = 100;
+
+    function sessionPdfAbsoluteUrl(url) {
+        if (!url) return '';
+        return url.startsWith('http') ? url : (window.location.origin + url);
+    }
+
+    function buildSessionPdfIframeSrc(url) {
+        const abs = sessionPdfAbsoluteUrl(url);
+        if (!abs) return '';
+        const base = abs.split('#')[0];
+        if (sessionPdfZoom === 'fit') {
+            return `${base}#toolbar=1&navpanes=0&view=FitH`;
+        }
+        return `${base}#toolbar=1&navpanes=0&zoom=${sessionPdfZoom}`;
+    }
+
+    function updatePdfZoomLabel() {
+        const el = document.getElementById('pdf-zoom-label');
+        if (el) el.textContent = sessionPdfZoom === 'fit' ? 'Fit' : `${sessionPdfZoom}%`;
+    }
+
+    function renderSessionPdf(url) {
+        const iframe = document.getElementById('session-pdf-viewer');
+        if (!iframe || !url) return;
+        iframe.style.display = 'block';
+        iframe.src = buildSessionPdfIframeSrc(url);
+        updatePdfZoomLabel();
+    }
+
+    function clearSessionPdfView() {
+        const iframe = document.getElementById('session-pdf-viewer');
+        if (iframe) {
+            iframe.removeAttribute('src');
+        }
+    }
+
+    function openSessionPdfInNewTab() {
+        const url = state.referencePdf && state.referencePdf.url;
+        if (!url) return;
+        window.open(sessionPdfAbsoluteUrl(url), '_blank', 'noopener');
+    }
+
+    function setSessionPdfZoom(next) {
+        if (next === 'fit') {
+            sessionPdfZoom = 'fit';
+        } else {
+            sessionPdfZoom = Math.max(50, Math.min(300, Math.round(next)));
+        }
+        updatePdfZoomLabel();
+        if (state.referencePdf && state.referencePdf.url) {
+            renderSessionPdf(state.referencePdf.url);
+        }
+    }
 
     let publishBlobUrl = null;
     let currentClashSlug = null;
@@ -482,95 +535,6 @@
             return null;
         }
         return null;
-    }
-
-    async function loadPdfJs() {
-        if (window.pdfjsLib) return window.pdfjsLib;
-        if (!pdfJsLoadPromise) {
-            pdfJsLoadPromise = new Promise((resolve, reject) => {
-                const s = document.createElement('script');
-                s.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
-                s.crossOrigin = 'anonymous';
-                s.onload = () => {
-                    if (window.pdfjsLib) {
-                        window.pdfjsLib.GlobalWorkerOptions.workerSrc =
-                            'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
-                        resolve(window.pdfjsLib);
-                    } else reject(new Error('pdf.js failed to load'));
-                };
-                s.onerror = () => reject(new Error('pdf.js script error'));
-                document.head.appendChild(s);
-            });
-        }
-        return pdfJsLoadPromise;
-    }
-
-    async function renderSessionPdf(url) {
-        const iframe = document.getElementById('session-pdf-viewer');
-        const container = document.getElementById('session-pdf-js-container');
-        if (!container) return;
-        const token = ++sessionPdfRenderToken;
-        container.style.display = 'block';
-        container.innerHTML = '<div class="session-pdf-js-loading">Loading PDF…</div>';
-        if (iframe) {
-            iframe.style.display = 'none';
-            iframe.removeAttribute('src');
-        }
-        try {
-            const pdfjsLib = await loadPdfJs();
-            if (token !== sessionPdfRenderToken) return;
-            const pdf = await pdfjsLib.getDocument({
-                url,
-                cMapUrl: 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/cmaps/',
-                cMapPacked: true,
-                standardFontDataUrl: 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/standard_fonts/'
-            }).promise;
-            if (token !== sessionPdfRenderToken) return;
-            container.innerHTML = '';
-            const maxPages = Math.min(pdf.numPages, 80);
-            for (let i = 1; i <= maxPages; i++) {
-                const page = await pdf.getPage(i);
-                if (token !== sessionPdfRenderToken) return;
-                const baseVp = page.getViewport({ scale: 1 });
-                const scale = Math.min(1.35, (container.clientWidth || 400) / baseVp.width);
-                const viewport = page.getViewport({ scale: Math.max(scale, 0.45) });
-                const canvas = document.createElement('canvas');
-                canvas.className = 'session-pdf-page';
-                canvas.width = viewport.width;
-                canvas.height = viewport.height;
-                container.appendChild(canvas);
-                await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
-            }
-            if (pdf.numPages > maxPages) {
-                const note = document.createElement('p');
-                note.className = 'session-pdf-js-loading';
-                note.textContent = `Showing first ${maxPages} of ${pdf.numPages} pages.`;
-                container.appendChild(note);
-            }
-        } catch (err) {
-            console.warn('PDF.js render failed, using iframe fallback:', err);
-            if (token !== sessionPdfRenderToken) return;
-            container.style.display = 'none';
-            container.innerHTML = '';
-            if (iframe) {
-                iframe.style.display = 'block';
-                iframe.src = url;
-            }
-        }
-    }
-
-    function clearSessionPdfView() {
-        sessionPdfRenderToken += 1;
-        const iframe = document.getElementById('session-pdf-viewer');
-        const container = document.getElementById('session-pdf-js-container');
-        if (container) {
-            container.innerHTML = '';
-            container.style.display = 'none';
-        }
-        if (iframe) {
-            iframe.style.display = 'none';
-            iframe.removeAttribute('src');
-        }
     }
 
     function pickHtmlForPublish(sessionData) {
@@ -3645,6 +3609,16 @@
         document.getElementById('session-access-modal-cancel')?.addEventListener('click', closeSessionAccessModal);
         document.getElementById('session-access-modal-backdrop')?.addEventListener('click', closeSessionAccessModal);
         document.getElementById('pdf-split-close')?.addEventListener('click', () => togglePdfSplit(false));
+        document.getElementById('pdf-open-new-tab')?.addEventListener('click', openSessionPdfInNewTab);
+        document.getElementById('pdf-zoom-in')?.addEventListener('click', () => {
+            const z = sessionPdfZoom === 'fit' ? 100 : sessionPdfZoom;
+            setSessionPdfZoom(z + 25);
+        });
+        document.getElementById('pdf-zoom-out')?.addEventListener('click', () => {
+            const z = sessionPdfZoom === 'fit' ? 100 : sessionPdfZoom;
+            setSessionPdfZoom(z - 25);
+        });
+        document.getElementById('pdf-zoom-fit')?.addEventListener('click', () => setSessionPdfZoom('fit'));
 
         document.getElementById('clear-output-btn')?.addEventListener('click', () => {
             document.getElementById('output-content').innerHTML = '';

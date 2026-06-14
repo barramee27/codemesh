@@ -3658,34 +3658,29 @@ select.input-full {
   flex-shrink: 0;
 }
 
+.pdf-split-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--vscode-border);
+  background: var(--vscode-titlebar-bg, #3c3c3c);
+}
+
+.pdf-zoom-label {
+  font-size: 11px;
+  min-width: 40px;
+  text-align: center;
+  color: var(--vscode-foreground, #ccc);
+}
+
 .session-pdf-viewer {
   flex: 1;
   width: 100%;
-  border: none;
-  background: #2d2d2d;
-}
-
-.session-pdf-js-container {
-  flex: 1;
   min-height: 0;
-  overflow: auto;
+  border: none;
   background: #525252;
-  padding: 8px 0;
-}
-
-.session-pdf-js-container .session-pdf-page {
-  display: block;
-  margin: 0 auto 12px;
-  max-width: 100%;
-  height: auto;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
-}
-
-.session-pdf-js-loading {
-  padding: 16px;
-  text-align: center;
-  color: var(--text-muted, #aaa);
-  font-size: 12px;
 }
   background: #1e1e1e;
 }

@@ -736,8 +736,22 @@
               <span id="pdf-split-title">Reference PDF</span>
               <button type="button" class="btn btn-icon btn-xs" id="pdf-split-close" title="Hide PDF pane"><i class="codicon codicon-close"></i></button>
             </div>
-            <div id="session-pdf-js-container" class="session-pdf-js-container" aria-label="Reference PDF pages"></div>
-            <iframe id="session-pdf-viewer" class="session-pdf-viewer" title="Reference PDF" style="display:none;"></iframe>
+            <div class="pdf-split-toolbar" id="pdf-split-toolbar">
+              <button type="button" class="btn btn-icon btn-xs" id="pdf-open-new-tab" title="Open in new tab (zoom, pen, print)">
+                <i class="codicon codicon-link-external"></i>
+              </button>
+              <button type="button" class="btn btn-icon btn-xs" id="pdf-zoom-out" title="Zoom out">
+                <i class="codicon codicon-zoom-out"></i>
+              </button>
+              <span id="pdf-zoom-label" class="pdf-zoom-label">100%</span>
+              <button type="button" class="btn btn-icon btn-xs" id="pdf-zoom-in" title="Zoom in">
+                <i class="codicon codicon-zoom-in"></i>
+              </button>
+              <button type="button" class="btn btn-icon btn-xs" id="pdf-zoom-fit" title="Fit width">
+                <i class="codicon codicon-screen-full"></i>
+              </button>
+            </div>
+            <iframe id="session-pdf-viewer" class="session-pdf-viewer" title="Reference PDF"></iframe>
           </aside>
           <div id="editor-code-pane" class="editor-code-pane">
         <div class="vscode-tabs-container">
