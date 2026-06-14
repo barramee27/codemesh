@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="th">
 
 <head>
   <meta charset="UTF-8">
@@ -507,8 +507,8 @@
             <div class="form-group">
               <label for="custom-session-id">Custom Session ID <span class="label-hint">(optional, 3–50
                   chars)</span></label>
-              <input type="text" id="custom-session-id" placeholder="e.g. A2-042 or my-project"
-                class="input-full" pattern="[a-zA-Z0-9_-]{3,50}" maxlength="50">
+              <input type="text" id="custom-session-id" placeholder="e.g. A2-042 or งาน-001"
+                class="input-full" maxlength="50">
             </div>
             <p class="form-hint" style="font-size:0.85rem;color:var(--text-muted);margin:0 0 0.5rem;">
               Language is chosen from file extensions (e.g. <code>.cpp</code>, <code>.js</code>) when you add files in the editor.
@@ -736,7 +736,8 @@
               <span id="pdf-split-title">Reference PDF</span>
               <button type="button" class="btn btn-icon btn-xs" id="pdf-split-close" title="Hide PDF pane"><i class="codicon codicon-close"></i></button>
             </div>
-            <iframe id="session-pdf-viewer" class="session-pdf-viewer" title="Reference PDF"></iframe>
+            <div id="session-pdf-js-container" class="session-pdf-js-container" aria-label="Reference PDF pages"></div>
+            <iframe id="session-pdf-viewer" class="session-pdf-viewer" title="Reference PDF" style="display:none;"></iframe>
           </aside>
           <div id="editor-code-pane" class="editor-code-pane">
         <div class="vscode-tabs-container">

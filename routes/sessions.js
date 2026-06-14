@@ -18,6 +18,11 @@ const {
     hashClassKey,
     sanitizeSessionForClient
 } = require('../utils/sessionAccess');
+const {
+    decodeMultipartFilename,
+    isValidSessionId,
+    normalizeUtf8Text
+} = require('../utils/utf8');
 
 const UPLOADS_DIR = path.join(__dirname, '..', 'uploads');
 if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true });
@@ -44,8 +49,6 @@ const JWT_SECRET = process.env.JWT_SECRET || 'fallback_secret';
 
 const router = express.Router();
 
-const SESSION_ID_RE = /^[a-zA-Z0-9_-]{3,50}$/;
-
 function sessionCanEdit(session, userId, isAdmin) {
     if (isAdmin) return true;
     if (session.owner.toString() === userId) return true;
@@ -57,7 +60,7 @@ function referencePdfPayload(session) {
     if (!session.referencePdf || !session.referencePdf.storageName) return null;
     return {
         url: `/uploads/${session.referencePdf.storageName}`,
-        originalName: session.referencePdf.originalName || 'reference.pdf'
+        originalName: normalizeUtf8Text(session.referencePdf.originalName) || 'reference.pdf'
     };
 }
 
@@ -99,7 +102,7 @@ function normalizeImportedFileList(rawFiles) {
         totalBytes += bytes;
         out.push({
             id: 'f_' + uuidv4().split('-')[0],
-            name: rel,
+            name: normalizeUtf8Text(rel),
             content,
             language: languageFromFilename(rel)
         });
@@ -111,9 +114,9 @@ function normalizeImportedFileList(rawFiles) {
 router.post('/join-or-create', authMiddleware, async (req, res) => {
     try {
         const raw = (req.body.sessionId || '').trim();
-        if (!SESSION_ID_RE.test(raw)) {
+        if (!isValidSessionId(raw)) {
             return res.status(400).json({
-                error: 'Session ID must be 3–50 characters: letters, numbers, _ or - only'
+                error: 'Session ID must be 3–50 characters: letters or numbers (any language), _ or - only (no spaces or /)'
             });
         }
 
@@ -143,7 +146,7 @@ router.post('/join-or-create', authMiddleware, async (req, res) => {
         const fileId = 'f_' + uuidv4().split('-')[0];
         session = new Session({
             sessionId: raw,
-            title: (req.body.title && String(req.body.title).trim()) || raw,
+            title: normalizeUtf8Text(req.body.title) || raw,
             language: 'plaintext',
             code: '',
             files: [{
@@ -173,9 +176,9 @@ router.post('/', authMiddleware, async (req, res) => {
         let sessionId;
         if (customSessionId) {
             const cleanId = customSessionId.trim();
-            if (!SESSION_ID_RE.test(cleanId)) {
+            if (!isValidSessionId(cleanId)) {
                 return res.status(400).json({
-                    error: 'Custom ID must be 3-50 characters, alphanumeric with _ or - only'
+                    error: 'Custom ID must be 3–50 characters: letters or numbers (any language), _ or - only'
                 });
             }
             // Check uniqueness
@@ -190,7 +193,7 @@ router.post('/', authMiddleware, async (req, res) => {
 
         const session = new Session({
             sessionId,
-            title: title || 'Untitled Session',
+            title: normalizeUtf8Text(title) || 'Untitled Session',
             language: language || 'plaintext',
             code: '',
             owner: req.user.id
@@ -501,7 +504,7 @@ router.post('/:id/pdf', authMiddleware, pdfUpload.single('pdf'), async (req, res
         }
         session.referencePdf = {
             storageName: req.file.filename,
-            originalName: req.file.originalname,
+            originalName: decodeMultipartFilename(req.file.originalname) || 'reference.pdf',
             uploadedAt: new Date()
         };
         session.updatedAt = Date.now();

@@ -397,6 +397,24 @@
         'web', 'site', 'clash'
     ]);
     const PUBLISH_SUFFIXES = new Set(['web', 'site']);
+    const SESSION_ID_UNICODE_RE = /^[\p{L}\p{N}_-]{3,50}$/u;
+
+    function decodeUrlPathSegment(seg) {
+        try { return decodeURIComponent(String(seg)); } catch (_) { return String(seg); }
+    }
+
+    function isValidSessionIdClient(sid) {
+        if (!sid || !SESSION_ID_UNICODE_RE.test(sid)) return false;
+        return !RESERVED_PATH_SEGMENTS.has(sid.toLowerCase());
+    }
+
+    /** URL path for a session (UTF-8 session IDs are percent-encoded). */
+    function sessionEditorPath(sessionId) {
+        return '/' + encodeURIComponent(sessionId);
+    }
+
+    let pdfJsLoadPromise = null;
+    let sessionPdfRenderToken = 0;
 
     let publishBlobUrl = null;
     let currentClashSlug = null;
@@ -429,7 +447,7 @@
         }
         if (host === 'clash.codemesh.org') {
             const rawH = window.location.pathname.replace(/^\/+|\/+$/g, '');
-            const partsH = rawH.split('/').filter(Boolean);
+            const partsH = rawH.split('/').filter(Boolean).map(decodeUrlPathSegment);
             if (partsH.length === 0) return { mode: 'clash-hub' };
             if (partsH.length >= 2 && partsH[0].toLowerCase() === 'c') {
                 return { mode: 'clash-room', clashSlug: partsH[1] };
@@ -439,7 +457,7 @@
 
         const raw = window.location.pathname.replace(/^\/+|\/+$/g, '');
         if (!raw) return null;
-        const parts = raw.split('/').filter(Boolean);
+        const parts = raw.split('/').filter(Boolean).map(decodeUrlPathSegment);
         const first = parts[0];
 
         if (first && first.toLowerCase() === 'clash') {
@@ -453,17 +471,106 @@
         if (!first || RESERVED_PATH_SEGMENTS.has(first.toLowerCase())) return null;
 
         if (parts.length === 1) {
-            if (/^[a-zA-Z0-9_-]{3,50}$/.test(first)) return { sessionId: first, mode: 'editor' };
+            if (isValidSessionIdClient(first)) return { sessionId: first, mode: 'editor' };
             return null;
         }
         if (parts.length === 2) {
             const sid = first;
             const sub = parts[1].toLowerCase();
-            if (!/^[a-zA-Z0-9_-]{3,50}$/.test(sid)) return null;
+            if (!isValidSessionIdClient(sid)) return null;
             if (PUBLISH_SUFFIXES.has(sub)) return { sessionId: sid, mode: 'publish', publishPath: sub };
             return null;
         }
         return null;
+    }
+
+    async function loadPdfJs() {
+        if (window.pdfjsLib) return window.pdfjsLib;
+        if (!pdfJsLoadPromise) {
+            pdfJsLoadPromise = new Promise((resolve, reject) => {
+                const s = document.createElement('script');
+                s.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
+                s.crossOrigin = 'anonymous';
+                s.onload = () => {
+                    if (window.pdfjsLib) {
+                        window.pdfjsLib.GlobalWorkerOptions.workerSrc =
+                            'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+                        resolve(window.pdfjsLib);
+                    } else reject(new Error('pdf.js failed to load'));
+                };
+                s.onerror = () => reject(new Error('pdf.js script error'));
+                document.head.appendChild(s);
+            });
+        }
+        return pdfJsLoadPromise;
+    }
+
+    async function renderSessionPdf(url) {
+        const iframe = document.getElementById('session-pdf-viewer');
+        const container = document.getElementById('session-pdf-js-container');
+        if (!container) return;
+        const token = ++sessionPdfRenderToken;
+        container.style.display = 'block';
+        container.innerHTML = '<div class="session-pdf-js-loading">Loading PDF…</div>';
+        if (iframe) {
+            iframe.style.display = 'none';
+            iframe.removeAttribute('src');
+        }
+        try {
+            const pdfjsLib = await loadPdfJs();
+            if (token !== sessionPdfRenderToken) return;
+            const pdf = await pdfjsLib.getDocument({
+                url,
+                cMapUrl: 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/cmaps/',
+                cMapPacked: true,
+                standardFontDataUrl: 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/standard_fonts/'
+            }).promise;
+            if (token !== sessionPdfRenderToken) return;
+            container.innerHTML = '';
+            const maxPages = Math.min(pdf.numPages, 80);
+            for (let i = 1; i <= maxPages; i++) {
+                const page = await pdf.getPage(i);
+                if (token !== sessionPdfRenderToken) return;
+                const baseVp = page.getViewport({ scale: 1 });
+                const scale = Math.min(1.35, (container.clientWidth || 400) / baseVp.width);
+                const viewport = page.getViewport({ scale: Math.max(scale, 0.45) });
+                const canvas = document.createElement('canvas');
+                canvas.className = 'session-pdf-page';
+                canvas.width = viewport.width;
+                canvas.height = viewport.height;
+                container.appendChild(canvas);
+                await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
+            }
+            if (pdf.numPages > maxPages) {
+                const note = document.createElement('p');
+                note.className = 'session-pdf-js-loading';
+                note.textContent = `Showing first ${maxPages} of ${pdf.numPages} pages.`;
+                container.appendChild(note);
+            }
+        } catch (err) {
+            console.warn('PDF.js render failed, using iframe fallback:', err);
+            if (token !== sessionPdfRenderToken) return;
+            container.style.display = 'none';
+            container.innerHTML = '';
+            if (iframe) {
+                iframe.style.display = 'block';
+                iframe.src = url;
+            }
+        }
+    }
+
+    function clearSessionPdfView() {
+        sessionPdfRenderToken += 1;
+        const iframe = document.getElementById('session-pdf-viewer');
+        const container = document.getElementById('session-pdf-js-container');
+        if (container) {
+            container.innerHTML = '';
+            container.style.display = 'none';
+        }
+        if (iframe) {
+            iframe.style.display = 'none';
+            iframe.removeAttribute('src');
+        }
     }
 
     function pickHtmlForPublish(sessionData) {
@@ -525,7 +632,7 @@
             if (!file || !String(file.content || '').trim()) {
                 if (wrap) wrap.style.display = 'none';
                 if (empty) empty.style.display = '';
-                const canon = '/' + sessionId + '/' + seg;
+                const canon = sessionEditorPath(sessionId) + '/' + seg;
                 if (window.location.pathname !== canon) {
                     history.replaceState({ sessionId, publish: true }, '', canon);
                 }
@@ -536,7 +643,7 @@
             if (iframe) iframe.src = publishBlobUrl;
             if (wrap) wrap.style.display = '';
             if (empty) empty.style.display = 'none';
-            const canon = '/' + sessionId + '/' + seg;
+            const canon = sessionEditorPath(sessionId) + '/' + seg;
             if (window.location.pathname !== canon) {
                 history.replaceState({ sessionId, publish: true }, '', canon);
             }
@@ -1101,17 +1208,16 @@
     function updateReferencePdfUI() {
         const pane = document.getElementById('pdf-split-pane');
         const layout = document.getElementById('editor-layout-split');
-        const iframe = document.getElementById('session-pdf-viewer');
         const title = document.getElementById('pdf-split-title');
         if (!pane || !layout) return;
         const hasPdf = !!(state.referencePdf && state.referencePdf.url);
         if (hasPdf && title) {
             title.textContent = state.referencePdf.originalName || 'Reference PDF';
         }
-        if (iframe && hasPdf) {
-            iframe.src = state.referencePdf.url;
-        } else if (iframe && !hasPdf) {
-            iframe.removeAttribute('src');
+        if (hasPdf) {
+            renderSessionPdf(state.referencePdf.url);
+        } else {
+            clearSessionPdfView();
         }
         const showSplit = hasPdf && state.pdfSplitVisible;
         pane.style.display = showSplit ? '' : 'none';
@@ -2380,7 +2486,7 @@
             if (state.terminal) { state.terminal.dispose(); state.terminal = null; }
 
             // Update URL to /sessionId for shareable links
-            const path = '/' + sessionId;
+            const path = sessionEditorPath(sessionId);
             if (window.location.pathname !== path) {
                 history.replaceState({ sessionId }, '', path);
             }
@@ -3449,7 +3555,7 @@
         document.getElementById('copy-session-link')?.addEventListener('click', () => {
             const id = state.currentSession;
             if (id) {
-                const url = window.location.origin + '/' + id;
+                const url = window.location.origin + sessionEditorPath(id);
                 navigator.clipboard.writeText(url).then(() => {
                     showToast('Session link copied to clipboard!', 'success');
                 }).catch(() => {

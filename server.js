@@ -71,11 +71,27 @@ app.get('/js/app.js', (req, res) => {
 // Static files with cache headers (1 day for assets)
 app.use(express.static(path.join(__dirname, 'public'), {
     maxAge: process.env.NODE_ENV === 'production' ? '1d' : 0,
-    etag: true
+    etag: true,
+    setHeaders(res, filePath) {
+        if (/\.(html?)$/i.test(filePath)) {
+            res.setHeader('Content-Type', 'text/html; charset=utf-8');
+        } else if (/\.css$/i.test(filePath)) {
+            res.setHeader('Content-Type', 'text/css; charset=utf-8');
+        } else if (/\.js$/i.test(filePath)) {
+            res.setHeader('Content-Type', 'application/javascript; charset=utf-8');
+        }
+    }
 }));
 
 // Admin uploads (publicly readable at /uploads/)
-app.use('/uploads', express.static(path.join(__dirname, 'uploads'), { etag: true }));
+app.use('/uploads', express.static(path.join(__dirname, 'uploads'), {
+    etag: true,
+    setHeaders(res, filePath) {
+        if (/\.pdf$/i.test(filePath)) {
+            res.setHeader('Content-Type', 'application/pdf');
+        }
+    }
+}));
 
 // ─── Rate limiting on API routes ───
 const apiLimiter = rateLimit({
@@ -99,6 +115,7 @@ app.use('/api/clashrooms', clashroomsRoutes);
 app.get('*', (req, res) => {
     if (!req.path.startsWith('/api') && !req.path.startsWith('/uploads')) {
         res.set('Cache-Control', 'no-cache, no-store, must-revalidate');
+        res.set('Content-Type', 'text/html; charset=utf-8');
         res.sendFile(path.join(__dirname, 'public', 'index.html'));
     }
 });
