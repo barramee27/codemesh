@@ -530,7 +530,7 @@ module.exports = function setupCollaboration(io) {
             io.to(targetSocketId).emit('role-changed', {
                 role,
                 message: role === 'viewer'
-                    ? 'View-only mode: you cannot edit files, but you can still run code and use the output panel.'
+                    ? 'View-only mode: you can read and run code, but editing and copying are disabled.'
                     : 'You now have editing permissions'
             });
 

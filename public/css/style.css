@@ -2165,6 +2165,14 @@ body.pane-resize-active * {
   pointer-events: none;
 }
 
+.viewer-no-copy .editor-container,
+.viewer-no-copy .monaco-editor,
+.viewer-no-copy .monaco-editor .view-lines,
+.viewer-no-copy .monaco-editor .margin {
+  -webkit-user-select: none !important;
+  user-select: none !important;
+}
+
 /* Additional VS Code UI enhancements */
 .vscode-layout ::-webkit-scrollbar {
   width: 10px;
