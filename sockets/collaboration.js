@@ -294,6 +294,7 @@ module.exports = function setupCollaboration(io) {
             });
 
             let defaultJoinRole = 'editor';
+            let allowCollaboratorCopy = false;
             let referencePdf = null;
             if (!dbSession) {
                 try {
@@ -302,6 +303,7 @@ module.exports = function setupCollaboration(io) {
             }
             if (dbSession) {
                 defaultJoinRole = dbSession.defaultJoinRole === 'viewer' ? 'viewer' : 'editor';
+                allowCollaboratorCopy = dbSession.allowCollaboratorCopy === true;
                 referencePdf = referencePdfForClient(dbSession);
             }
 
@@ -313,6 +315,7 @@ module.exports = function setupCollaboration(io) {
                 comments: state.comments,
                 chatMessages: state.chatMessages || [],
                 defaultJoinRole,
+                allowCollaboratorCopy,
                 referencePdf,
                 pdfSplitVisible: !!referencePdf
             });
@@ -530,8 +533,8 @@ module.exports = function setupCollaboration(io) {
             io.to(targetSocketId).emit('role-changed', {
                 role,
                 message: role === 'viewer'
-                    ? 'View-only mode: you cannot edit files, but you can still run code and use the output panel.'
-                    : 'You now have editing permissions'
+                    ? 'View-only mode: you cannot edit files in this session.'
+                    : 'You now have editing permissions.'
             });
 
             // Notify everyone about the role change
@@ -642,6 +645,25 @@ module.exports = function setupCollaboration(io) {
             });
         });
 
+        socket.on('set-copy-policy', async (data) => {
+            const { sessionId, allowCollaboratorCopy } = data;
+            if (!sessionId || typeof allowCollaboratorCopy !== 'boolean') return;
+            const state = activeSessions.get(sessionId);
+            if (!state) return;
+            const requester = state.users.get(socket.id);
+            if (!requester || (requester.role !== 'owner' && requester.role !== 'admin')) return;
+            try {
+                const dbSession = await Session.findOne({ sessionId });
+                if (!dbSession) return;
+                dbSession.allowCollaboratorCopy = allowCollaboratorCopy;
+                dbSession.updatedAt = Date.now();
+                await dbSession.save();
+                io.to(sessionId).emit('copy-policy-changed', { allowCollaboratorCopy });
+            } catch (err) {
+                console.error('set-copy-policy:', err.message);
+            }
+        });
+
         socket.on('set-join-policy', async (data) => {
             const { sessionId, defaultJoinRole } = data;
             if (!sessionId || !['editor', 'viewer'].includes(defaultJoinRole)) return;
@@ -678,11 +700,13 @@ module.exports = function setupCollaboration(io) {
                 };
             });
             let defaultJoinRole = 'editor';
+            let allowCollaboratorCopy = false;
             let referencePdf = null;
             try {
                 const dbSession = await Session.findOne({ sessionId });
                 if (dbSession) {
                     defaultJoinRole = dbSession.defaultJoinRole === 'viewer' ? 'viewer' : 'editor';
+                    allowCollaboratorCopy = dbSession.allowCollaboratorCopy === true;
                     referencePdf = referencePdfForClient(dbSession);
                 }
             } catch (err) { /* ignore */ }
@@ -693,6 +717,7 @@ module.exports = function setupCollaboration(io) {
                 comments: state.comments,
                 chatMessages: state.chatMessages || [],
                 defaultJoinRole,
+                allowCollaboratorCopy,
                 referencePdf,
                 pdfSplitVisible: !!referencePdf
             });

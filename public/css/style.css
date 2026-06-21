@@ -2165,6 +2165,24 @@ body.pane-resize-active * {
   pointer-events: none;
 }
 
+.viewer-no-copy .editor-container,
+.viewer-no-copy .monaco-editor,
+.viewer-no-copy .monaco-editor .view-lines,
+.viewer-no-copy .monaco-editor .margin,
+.session-no-copy .editor-container,
+.session-no-copy .monaco-editor,
+.session-no-copy .monaco-editor .view-lines,
+.session-no-copy .monaco-editor .margin,
+.session-no-copy .monaco-editor .view-overlays,
+.session-no-copy .monaco-editor .selected-text {
+  -webkit-user-select: none !important;
+  user-select: none !important;
+}
+
+.session-no-copy .monaco-editor .cursors-layer .cursor {
+  pointer-events: auto;
+}
+
 /* Additional VS Code UI enhancements */
 .vscode-layout ::-webkit-scrollbar {
   width: 10px;
@@ -3625,6 +3643,18 @@ body.pane-resize-active * {
   background: var(--vscode-input-bg);
   color: var(--vscode-input-fg);
   font-size: 12px;
+}
+
+.copy-policy-wrap {
+  cursor: pointer;
+}
+
+.copy-policy-toggle {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  cursor: pointer;
+  accent-color: var(--accent-primary, #6c5ce7);
 }
 
 .session-access-wrap {

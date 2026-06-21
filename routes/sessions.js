@@ -456,6 +456,41 @@ router.put('/:id/access', authMiddleware, async (req, res) => {
     }
 });
 
+// PUT /api/sessions/:id/copy-policy — allow guests to copy/highlight/download (owner or site admin)
+router.put('/:id/copy-policy', authMiddleware, async (req, res) => {
+    try {
+        if (typeof req.body.allowCollaboratorCopy !== 'boolean') {
+            return res.status(400).json({ error: 'allowCollaboratorCopy (boolean) is required' });
+        }
+        const session = await Session.findOne({ sessionId: req.params.id });
+        if (!session) return res.status(404).json({ error: 'Session not found' });
+        if (!sessionIsOwnerOrSiteAdmin(session, req.user.id, req.user.role === 'admin')) {
+            return res.status(403).json({ error: 'Only the session owner or site admin can change copy policy' });
+        }
+        session.allowCollaboratorCopy = req.body.allowCollaboratorCopy;
+        session.updatedAt = Date.now();
+        await session.save();
+
+        const io = req.app.get('io');
+        if (io) {
+            io.to(session.sessionId).emit('copy-policy-changed', {
+                allowCollaboratorCopy: session.allowCollaboratorCopy
+            });
+        }
+
+        res.json({
+            message: session.allowCollaboratorCopy
+                ? 'Guests can now copy, highlight, and download code'
+                : 'Guest copy, highlight, and download are now blocked',
+            allowCollaboratorCopy: session.allowCollaboratorCopy,
+            session: attachSessionMeta(session)
+        });
+    } catch (err) {
+        console.error('copy-policy error:', err);
+        res.status(500).json({ error: 'Failed to update copy policy' });
+    }
+});
+
 // PUT /api/sessions/:id/join-policy — default role for new guests (owner or site admin)
 router.put('/:id/join-policy', authMiddleware, async (req, res) => {
     try {
