@@ -79,6 +79,11 @@ const sessionSchema = new mongoose.Schema({
         enum: ['editor', 'viewer'],
         default: 'editor'
     },
+    /** When false, only owner/admin can copy, highlight, or download session code. */
+    allowCollaboratorCopy: {
+        type: Boolean,
+        default: false
+    },
     /** Optional reference PDF for split view (owner or site admin). */
     referencePdf: {
         storageName: { type: String },

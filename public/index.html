@@ -614,12 +614,16 @@
           Saved
         </span>
         <span class="role-badge" id="user-role-badge" style="display:none;"></span>
-        <label id="join-policy-wrap" class="join-policy-wrap" style="display:none;" title="Default role for people who open your invite link. Only the session owner can copy code; guests can edit or view but cannot copy or highlight it.">
+        <label id="join-policy-wrap" class="join-policy-wrap" style="display:none;" title="Default role for people who open your invite link">
           <span class="join-policy-label">New guests</span>
           <select id="join-policy-select" class="join-policy-select">
             <option value="editor">Editor</option>
             <option value="viewer">Viewer (view only)</option>
           </select>
+        </label>
+        <label id="copy-policy-wrap" class="join-policy-wrap copy-policy-wrap" style="display:none;" title="Allow editors and viewers to copy, highlight, and download session code">
+          <span class="join-policy-label">Guest copy</span>
+          <input type="checkbox" id="copy-policy-toggle" class="copy-policy-toggle" aria-label="Allow guests to copy code" />
         </label>
         <div id="session-access-wrap" class="session-access-wrap" style="display:none;" title="Public sessions are open to anyone with the link; private sessions require a class key">
           <select id="session-access-select" class="join-policy-select" aria-label="Session visibility">

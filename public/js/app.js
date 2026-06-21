@@ -28,6 +28,7 @@
         openTabs: new Set(), // Set of fileIds
         tabOrder: [], // display order for open tabs (drag to reorder)
         defaultJoinRole: 'editor', // default for new guests (owner sets)
+        allowCollaboratorCopy: false, // owner/admin can allow guests to copy code
         referencePdf: null, // { url, originalName } | null
         pdfSplitVisible: false,
         sessionOwnerId: null,
@@ -654,7 +655,14 @@
     }
 
     function userCanCopySessionCode() {
-        return state.userRole === 'owner' || state.userRole === 'admin';
+        if (state.userRole === 'owner' || state.userRole === 'admin') return true;
+        return !!state.allowCollaboratorCopy;
+    }
+
+    function copyBlockedMessage() {
+        return state.allowCollaboratorCopy
+            ? 'Copying is not allowed for your role'
+            : 'Copying is disabled for guests in this session';
     }
 
     let sessionCopyProtectionAbort = null;
@@ -681,7 +689,7 @@
             if (userCanCopySessionCode()) return;
             e.preventDefault();
             e.stopPropagation();
-            showToast('Only the session owner can copy this code', 'info');
+            showToast(copyBlockedMessage(), 'info');
         };
 
         const blockSelection = (e) => {
@@ -713,7 +721,7 @@
                 e.preventDefault();
                 e.stopPropagation();
                 if (key === 'c' || key === 'x') {
-                    showToast('Only the session owner can copy this code', 'info');
+                    showToast(copyBlockedMessage(), 'info');
                 }
             }
         }, opts);
@@ -730,7 +738,7 @@
                 e.preventDefault();
                 e.stopPropagation();
                 if (k === monaco.KeyCode.KeyC || k === monaco.KeyCode.KeyX) {
-                    showToast('Only the session owner can copy this code', 'info');
+                    showToast(copyBlockedMessage(), 'info');
                 }
             }
         });
@@ -1436,6 +1444,15 @@
         state.tabOrder = order;
     }
 
+    function updateCopyPolicyUI() {
+        const wrap = document.getElementById('copy-policy-wrap');
+        const toggle = document.getElementById('copy-policy-toggle');
+        if (!wrap || !toggle) return;
+        const show = userCanManageSessionSettings();
+        wrap.style.display = show ? '' : 'none';
+        toggle.checked = !!state.allowCollaboratorCopy;
+    }
+
     function updateJoinPolicyUI() {
         const wrap = document.getElementById('join-policy-wrap');
         const sel = document.getElementById('join-policy-select');
@@ -1487,6 +1504,9 @@
         if (meta.defaultJoinRole) {
             state.defaultJoinRole = meta.defaultJoinRole === 'viewer' ? 'viewer' : 'editor';
         }
+        if (meta.allowCollaboratorCopy !== undefined) {
+            state.allowCollaboratorCopy = !!meta.allowCollaboratorCopy;
+        }
         if (meta.referencePdf !== undefined) {
             state.referencePdf = meta.referencePdf
                 ? normalizeReferencePdf({ referencePdf: meta.referencePdf })
@@ -1510,8 +1530,43 @@
             state.sessionHasClassKey = !!meta.hasClassKey;
         }
         updateJoinPolicyUI();
+        updateCopyPolicyUI();
         updateReferencePdfUI();
         updateSessionAccessUI();
+    }
+
+    async function setAllowCollaboratorCopy(allowed) {
+        if (!state.currentSession || !userCanManageSessionSettings()) return;
+        const previous = state.allowCollaboratorCopy;
+        state.allowCollaboratorCopy = !!allowed;
+        updateCopyPolicyUI();
+        updateSessionCopyRestrictions();
+        if (state.userRole === 'viewer') setEditorReadOnly(true);
+        try {
+            if (state.socket && state.socket.connected) {
+                state.socket.emit('set-copy-policy', {
+                    sessionId: state.currentSession,
+                    allowCollaboratorCopy: state.allowCollaboratorCopy
+                });
+            } else {
+                await api(`/sessions/${state.currentSession}/copy-policy`, {
+                    method: 'PUT',
+                    body: JSON.stringify({ allowCollaboratorCopy: state.allowCollaboratorCopy })
+                });
+            }
+            showToast(
+                state.allowCollaboratorCopy
+                    ? 'Guests can now copy, highlight, and download code'
+                    : 'Guest copy, highlight, and download are now blocked',
+                'success'
+            );
+        } catch (err) {
+            state.allowCollaboratorCopy = previous;
+            updateCopyPolicyUI();
+            updateSessionCopyRestrictions();
+            if (state.userRole === 'viewer') setEditorReadOnly(true);
+            showToast(err.message || 'Failed to update copy policy', 'error');
+        }
     }
 
     function togglePdfSplit(force) {
@@ -2375,7 +2430,7 @@
             return;
         }
         if (!userCanCopySessionCode()) {
-            showToast('Only the session owner can download this code', 'info');
+            showToast('Guest copy is disabled for this session', 'info');
             return;
         }
         const file = state.activeFileId ? state.files.get(state.activeFileId) : null;
@@ -2785,6 +2840,7 @@
 
             applySessionMeta({
                 defaultJoinRole: sessionData.defaultJoinRole,
+                allowCollaboratorCopy: sessionData.allowCollaboratorCopy,
                 referencePdf: sessionData.referencePdf,
                 pdfSplitVisible: sessionData.referencePdf ? true : false,
                 owner: sessionData.owner,
@@ -2833,13 +2889,14 @@
             // Set user role
             state.userRole = data.role || 'editor';
             updateRoleBadge(state.userRole);
-            setEditorReadOnly(state.userRole === 'viewer');
-            updateSessionCopyRestrictions();
             applySessionMeta({
                 defaultJoinRole: data.defaultJoinRole,
+                allowCollaboratorCopy: data.allowCollaboratorCopy,
                 referencePdf: data.referencePdf,
                 pdfSplitVisible: data.pdfSplitVisible
             });
+            setEditorReadOnly(state.userRole === 'viewer');
+            updateSessionCopyRestrictions();
 
             if (data.comments) {
                 state.comments = data.comments;
@@ -2968,6 +3025,22 @@
             updateJoinPolicyUI();
         });
 
+        state.socket.on('copy-policy-changed', (data) => {
+            if (!data || data.allowCollaboratorCopy === undefined) return;
+            state.allowCollaboratorCopy = !!data.allowCollaboratorCopy;
+            updateCopyPolicyUI();
+            updateSessionCopyRestrictions();
+            if (state.userRole === 'viewer') setEditorReadOnly(true);
+            if (!userCanManageSessionSettings()) {
+                showToast(
+                    state.allowCollaboratorCopy
+                        ? 'The owner enabled copy, highlight, and download for guests'
+                        : 'The owner disabled guest copy, highlight, and download',
+                    'info'
+                );
+            }
+        });
+
         state.socket.on('access-settings-changed', (data) => {
             if (!data) return;
             state.sessionIsPublic = data.isPublic !== false;
@@ -3076,10 +3149,8 @@
             updateSessionCopyRestrictions();
             showToast(
                 data.message || (data.role === 'viewer'
-                    ? 'You are a viewer: read-only, and only the owner can copy code.'
-                    : data.role === 'editor'
-                        ? 'You can edit, but only the session owner can copy or highlight code.'
-                        : 'Role updated'),
+                    ? 'You are a viewer: read-only in this session.'
+                    : 'Role updated'),
                 data.role === 'viewer' ? 'info' : 'success'
             );
         });
@@ -3627,13 +3698,17 @@
         if (readonly && !existing) {
             const overlay = document.createElement('div');
             overlay.className = 'viewer-overlay';
-            overlay.textContent = 'View only — only the owner can copy code';
+            overlay.textContent = state.allowCollaboratorCopy
+                ? 'View only — you can still run code'
+                : 'View only — guest copy disabled';
             container.style.position = 'relative';
             container.appendChild(overlay);
         } else if (!readonly && existing) {
             existing.remove();
         } else if (readonly && existing) {
-            existing.textContent = 'View only — only the owner can copy code';
+            existing.textContent = state.allowCollaboratorCopy
+                ? 'View only — you can still run code'
+                : 'View only — guest copy disabled';
         }
     }
 
@@ -3902,6 +3977,9 @@
         });
         document.getElementById('join-policy-select')?.addEventListener('change', (e) => {
             setDefaultJoinRole(e.target.value);
+        });
+        document.getElementById('copy-policy-toggle')?.addEventListener('change', (e) => {
+            setAllowCollaboratorCopy(e.target.checked);
         });
         document.getElementById('session-access-select')?.addEventListener('change', () => {
             const keyInput = document.getElementById('session-class-key-input');

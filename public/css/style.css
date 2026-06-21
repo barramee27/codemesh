@@ -3645,6 +3645,18 @@ body.pane-resize-active * {
   font-size: 12px;
 }
 
+.copy-policy-wrap {
+  cursor: pointer;
+}
+
+.copy-policy-toggle {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  cursor: pointer;
+  accent-color: var(--accent-primary, #6c5ce7);
+}
+
 .session-access-wrap {
   display: inline-flex;
   align-items: center;
