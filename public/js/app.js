@@ -653,24 +653,24 @@
         return state.userRole === 'owner' || state.userRole === 'editor' || state.userRole === 'admin';
     }
 
-    function userIsViewer() {
-        return state.userRole === 'viewer';
+    function userCanCopySessionCode() {
+        return state.userRole === 'owner' || state.userRole === 'admin';
     }
 
-    let viewerCopyProtectionAbort = null;
+    let sessionCopyProtectionAbort = null;
 
-    function setViewerCopyProtection(enabled) {
+    function setSessionCopyProtection(enabled) {
         const primaryPane = document.getElementById('editor-split-pane-primary');
-        primaryPane?.classList.toggle('viewer-no-copy', enabled);
+        primaryPane?.classList.toggle('session-no-copy', enabled);
 
-        if (viewerCopyProtectionAbort) {
-            viewerCopyProtectionAbort.abort();
-            viewerCopyProtectionAbort = null;
+        if (sessionCopyProtectionAbort) {
+            sessionCopyProtectionAbort.abort();
+            sessionCopyProtectionAbort = null;
         }
         if (!enabled) return;
 
         const ac = new AbortController();
-        viewerCopyProtectionAbort = ac;
+        sessionCopyProtectionAbort = ac;
         const opts = { capture: true, signal: ac.signal };
         const targets = [
             document.getElementById('editor-container'),
@@ -678,27 +678,33 @@
         ].filter(Boolean);
 
         const blockClipboard = (e) => {
-            if (!userIsViewer()) return;
+            if (userCanCopySessionCode()) return;
             e.preventDefault();
             e.stopPropagation();
-            showToast('Copying session code is disabled for viewers', 'info');
+            showToast('Only the session owner can copy this code', 'info');
+        };
+
+        const blockSelection = (e) => {
+            if (userCanCopySessionCode()) return;
+            e.preventDefault();
         };
 
         for (const el of targets) {
             el.addEventListener('copy', blockClipboard, opts);
             el.addEventListener('cut', blockClipboard, opts);
+            el.addEventListener('selectstart', blockSelection, opts);
             el.addEventListener('contextmenu', (e) => {
-                if (!userIsViewer()) return;
+                if (userCanCopySessionCode()) return;
                 e.preventDefault();
             }, opts);
             el.addEventListener('dragstart', (e) => {
-                if (!userIsViewer()) return;
+                if (userCanCopySessionCode()) return;
                 e.preventDefault();
             }, opts);
         }
 
         document.addEventListener('keydown', (e) => {
-            if (!userIsViewer()) return;
+            if (userCanCopySessionCode()) return;
             if (state.focusedPane !== 'primary') return;
             const mod = e.ctrlKey || e.metaKey;
             if (!mod) return;
@@ -707,16 +713,16 @@
                 e.preventDefault();
                 e.stopPropagation();
                 if (key === 'c' || key === 'x') {
-                    showToast('Copying session code is disabled for viewers', 'info');
+                    showToast('Only the session owner can copy this code', 'info');
                 }
             }
         }, opts);
     }
 
-    function attachViewerEditorCopyGuards(editor, fileId) {
+    function attachSessionEditorCopyGuards(editor, fileId) {
         if (!editor || fileId === SPLIT_SCRATCH_ID) return;
         editor.onKeyDown((e) => {
-            if (!userIsViewer()) return;
+            if (userCanCopySessionCode()) return;
             const mod = e.ctrlKey || e.metaKey;
             if (!mod) return;
             const k = e.keyCode;
@@ -724,16 +730,49 @@
                 e.preventDefault();
                 e.stopPropagation();
                 if (k === monaco.KeyCode.KeyC || k === monaco.KeyCode.KeyX) {
-                    showToast('Copying session code is disabled for viewers', 'info');
+                    showToast('Only the session owner can copy this code', 'info');
                 }
             }
         });
     }
 
-    function updateViewerRestrictedUI() {
-        const isViewer = userIsViewer();
-        document.getElementById('download-active-file-btn')?.style.setProperty('display', isViewer ? 'none' : '');
-        document.getElementById('split-pane-download-btn')?.style.setProperty('display', isViewer ? 'none' : '');
+    function collapseSessionSelection(editor, fileId) {
+        if (!editor || fileId === SPLIT_SCRATCH_ID || userCanCopySessionCode()) return;
+        const selection = editor.getSelection();
+        if (!selection || selection.isEmpty()) return;
+        const pos = selection.getPosition();
+        editor.setSelection(monaco.Selection.fromPositions(pos, pos));
+    }
+
+    function updateSessionCopyRestrictions() {
+        const restricted = !userCanCopySessionCode();
+        setSessionCopyProtection(restricted);
+        updateCopyRestrictedUI();
+        const canCopySession = userCanCopySessionCode();
+        if (state.editorView) {
+            state.editorView.updateOptions({
+                selectionClipboard: canCopySession,
+                selectionHighlight: canCopySession
+            });
+        }
+        if (state.splitEditor) {
+            state.splitEditor.updateOptions({
+                selectionClipboard: true,
+                selectionHighlight: true
+            });
+        }
+        if (state.editorView && state.activeFileId) {
+            collapseSessionSelection(state.editorView, state.activeFileId);
+        }
+    }
+
+    function updateCopyRestrictedUI() {
+        const canCopySession = userCanCopySessionCode();
+        document.getElementById('download-active-file-btn')?.style.setProperty('display', canCopySession ? '' : 'none');
+        document.getElementById('split-pane-download-btn')?.style.setProperty(
+            'display',
+            canCopySession || state.userRole === 'editor' ? '' : 'none'
+        );
     }
 
     function fileDocFromPayload(fileData) {
@@ -2331,12 +2370,12 @@
     }
 
     function downloadActiveFile() {
-        if (userIsViewer()) {
-            showToast('Downloading session code is disabled for viewers', 'info');
-            return;
-        }
         if (state.splitActive && state.focusedPane === 'split') {
             downloadSplitScratch();
+            return;
+        }
+        if (!userCanCopySessionCode()) {
+            showToast('Only the session owner can download this code', 'info');
             return;
         }
         const file = state.activeFileId ? state.files.get(state.activeFileId) : null;
@@ -2353,6 +2392,10 @@
     }
 
     function downloadSplitScratch() {
+        if (state.userRole === 'viewer') {
+            showToast('Downloading is disabled for viewers', 'info');
+            return;
+        }
         if (!state.splitActive || !state.splitEditor) {
             showToast('Open the split test pane first', 'info');
             return;
@@ -2421,7 +2464,9 @@
             readOnly: state.userRole === 'viewer',
             minimap: { enabled: false },
             wordWrap: "on",
-            padding: { top: 10 }
+            padding: { top: 10 },
+            selectionClipboard: fileId === SPLIT_SCRATCH_ID || userCanCopySessionCode(),
+            selectionHighlight: fileId === SPLIT_SCRATCH_ID || userCanCopySessionCode()
         });
 
         editor.onDidChangeModelContent((e) => {
@@ -2433,6 +2478,10 @@
         });
 
         editor.onDidChangeCursorSelection((e) => {
+            if (!userCanCopySessionCode() && fileId !== SPLIT_SCRATCH_ID && !e.selection.isEmpty()) {
+                collapseSessionSelection(editor, fileId);
+                return;
+            }
             handleCursorUpdate(e, fileId);
         });
 
@@ -2442,7 +2491,7 @@
             }
         });
 
-        attachViewerEditorCopyGuards(editor, fileId);
+        attachSessionEditorCopyGuards(editor, fileId);
 
         updateStdinHintForCode(doc, fileId === SPLIT_SCRATCH_ID ? 'split' : 'primary');
         layoutMonacoEditor();
@@ -2785,6 +2834,7 @@
             state.userRole = data.role || 'editor';
             updateRoleBadge(state.userRole);
             setEditorReadOnly(state.userRole === 'viewer');
+            updateSessionCopyRestrictions();
             applySessionMeta({
                 defaultJoinRole: data.defaultJoinRole,
                 referencePdf: data.referencePdf,
@@ -3023,10 +3073,13 @@
             state.userRole = data.role;
             updateRoleBadge(data.role);
             setEditorReadOnly(data.role === 'viewer');
+            updateSessionCopyRestrictions();
             showToast(
                 data.message || (data.role === 'viewer'
-                    ? 'You are a viewer: you can read and run code, but copying is disabled.'
-                    : 'Role updated'),
+                    ? 'You are a viewer: read-only, and only the owner can copy code.'
+                    : data.role === 'editor'
+                        ? 'You can edit, but only the session owner can copy or highlight code.'
+                        : 'Role updated'),
                 data.role === 'viewer' ? 'info' : 'success'
             );
         });
@@ -3358,6 +3411,7 @@
         if (state.splitActive) syncSplitScratchFromLeft();
 
         if (state.userRole === 'viewer') setEditorReadOnly(true);
+        updateSessionCopyRestrictions();
 
         file.language = resolveEditorLanguage(file, file.doc);
         updateStatusbarLanguage(file.language);
@@ -3547,7 +3601,7 @@
         badge.className = `role-badge role-${role}`;
         const labels = { owner: '👑 Owner', editor: '🟢 Editor', viewer: '👁 Viewer' };
         badge.textContent = labels[role] || role;
-        updateViewerRestrictedUI();
+        updateCopyRestrictedUI();
     }
 
     function toggleSidebar() {
@@ -3565,8 +3619,6 @@
     function setEditorReadOnly(readonly) {
         if (state.editorView) state.editorView.updateOptions({ readOnly: readonly });
         if (state.splitEditor) state.splitEditor.updateOptions({ readOnly: readonly });
-        setViewerCopyProtection(readonly);
-        updateViewerRestrictedUI();
 
         // Add/remove viewer overlay (primary pane only)
         const container = document.getElementById('editor-container');
@@ -3575,13 +3627,13 @@
         if (readonly && !existing) {
             const overlay = document.createElement('div');
             overlay.className = 'viewer-overlay';
-            overlay.textContent = 'View only — copying disabled, you can still run code';
+            overlay.textContent = 'View only — only the owner can copy code';
             container.style.position = 'relative';
             container.appendChild(overlay);
         } else if (!readonly && existing) {
             existing.remove();
         } else if (readonly && existing) {
-            existing.textContent = 'View only — copying disabled, you can still run code';
+            existing.textContent = 'View only — only the owner can copy code';
         }
     }
 
