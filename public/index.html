@@ -625,6 +625,28 @@
           <span class="join-policy-label">Guest copy</span>
           <input type="checkbox" id="copy-policy-toggle" class="copy-policy-toggle" aria-label="Allow guests to copy code" />
         </label>
+        <div id="code-visibility-wrap" class="code-visibility-wrap" style="display:none;" title="Limit how long non-owners can view session code (code stays saved on the server)">
+          <label class="code-visibility-toggle-label">
+            <span class="join-policy-label">Guest view timer</span>
+            <input type="checkbox" id="code-visibility-toggle" class="copy-policy-toggle" aria-label="Enable guest code visibility timer" />
+          </label>
+          <span id="code-visibility-controls" class="code-visibility-controls" style="display:none;">
+            <select id="code-visibility-duration" class="join-policy-select" aria-label="Guest code visibility duration">
+              <option value="15">15 min</option>
+              <option value="30">30 min</option>
+              <option value="60">1 hour</option>
+              <option value="120">2 hours</option>
+              <option value="360">6 hours</option>
+              <option value="1440">24 hours</option>
+              <option value="custom">Custom</option>
+            </select>
+            <input type="number" id="code-visibility-custom-minutes" class="code-visibility-custom-input" min="1" max="525600" placeholder="Min" style="display:none;" aria-label="Custom minutes" />
+            <button type="button" class="btn btn-xs btn-secondary" id="code-visibility-apply-btn">Apply</button>
+          </span>
+          <span id="code-visibility-status" class="code-visibility-status" aria-live="polite"></span>
+          <button type="button" class="btn btn-xs btn-secondary" id="code-visibility-forever-btn" style="display:none;">Forever</button>
+          <button type="button" class="btn btn-xs btn-primary" id="code-visibility-restore-btn" style="display:none;">Bring back</button>
+        </div>
         <div id="session-access-wrap" class="session-access-wrap" style="display:none;" title="Public sessions are open to anyone with the link; private sessions require a class key">
           <select id="session-access-select" class="join-policy-select" aria-label="Session visibility">
             <option value="public">Public</option>
@@ -789,6 +811,19 @@
         <div class="editor-content-wrapper" id="editor-wrapper">
           <div id="editor-split-container" class="editor-split-container">
             <div class="editor-split-pane editor-split-pane-primary" id="editor-split-pane-primary" data-pane="primary">
+              <div id="code-restricted-bar" class="code-restricted-bar" style="display:none;" role="status" aria-live="polite">
+                <i class="codicon codicon-lock" aria-hidden="true"></i>
+                <span id="code-restricted-bar-text"></span>
+              </div>
+              <div id="code-restricted-placeholder" class="code-restricted-placeholder" style="display:none;" aria-hidden="true">
+                <div class="code-restricted-placeholder-inner">
+                  <i class="codicon codicon-lock code-restricted-placeholder-icon" aria-hidden="true"></i>
+                  <h3 class="code-restricted-placeholder-title">Code view restricted</h3>
+                  <p class="code-restricted-placeholder-lead">This session contains code, but the owner has limited guest viewing. Your files are still here — only the contents are hidden.</p>
+                  <p id="code-restricted-file-summary" class="code-restricted-file-summary"></p>
+                  <p class="code-restricted-placeholder-hint">Ask the session owner if you need access restored.</p>
+                </div>
+              </div>
               <div id="editor-container" class="editor-container"></div>
             </div>
             <div id="editor-code-split-splitter" class="pane-splitter pane-splitter-vertical" role="separator"

@@ -16,7 +16,8 @@ const {
     sessionIsOwnerOrSiteAdmin,
     ensureSessionAccess,
     hashClassKey,
-    sanitizeSessionForClient
+    sanitizeSessionForClient,
+    getGuestCodeVisibilityInfo
 } = require('../utils/sessionAccess');
 const {
     decodeMultipartFilename,
@@ -65,6 +66,19 @@ function attachSessionMeta(session) {
     const obj = session.toObject ? session.toObject() : { ...session };
     obj.referencePdf = referencePdfPayload(session);
     return obj;
+}
+
+function viewerContext(req) {
+    return { userId: req.user.id, userRole: req.user.role };
+}
+
+function broadcastCodeVisibility(req, session) {
+    const io = req.app && req.app.get('io');
+    if (!io || !session) return;
+    io.to(session.sessionId).emit('code-visibility-changed', {
+        guestCodeVisibleUntil: session.guestCodeVisibleUntil || null,
+        guestCodeVisibility: getGuestCodeVisibilityInfo(session)
+    });
 }
 
 function broadcastReferencePdf(req, sessionId, referencePdf) {
@@ -137,7 +151,7 @@ router.post('/join-or-create', authMiddleware, async (req, res) => {
             }
             await access.session.populate('owner', 'username');
             await access.session.populate('collaborators.user', 'username');
-            return res.json(sanitizeSessionForClient(access.session));
+            return res.json(sanitizeSessionForClient(access.session, viewerContext(req)));
         }
 
         const fileId = 'f_' + uuidv4().split('-')[0];
@@ -157,7 +171,7 @@ router.post('/join-or-create', authMiddleware, async (req, res) => {
         });
         await session.save();
         await session.populate('owner', 'username');
-        return res.status(201).json(sanitizeSessionForClient(session));
+        return res.status(201).json(sanitizeSessionForClient(session, viewerContext(req)));
     } catch (err) {
         console.error('join-or-create error:', err);
         return res.status(500).json({ error: 'Failed to open or create session' });
@@ -361,7 +375,7 @@ router.get('/:id', async (req, res) => {
             });
         }
 
-        res.json(sanitizeSessionForClient(access.session));
+        res.json(sanitizeSessionForClient(access.session, { userId, userRole }));
     } catch (err) {
         console.error('Get session error:', err);
         res.status(500).json({ error: 'Failed to get session' });
@@ -448,7 +462,7 @@ router.put('/:id/access', authMiddleware, async (req, res) => {
 
         res.json({
             message: session.isPublic ? 'Session is now public' : 'Session is now private (class key required)',
-            session: sanitizeSessionForClient(session)
+            session: sanitizeSessionForClient(session, viewerContext(req))
         });
     } catch (err) {
         console.error('session access settings:', err);
@@ -514,6 +528,54 @@ router.put('/:id/join-policy', authMiddleware, async (req, res) => {
     } catch (err) {
         console.error('join-policy error:', err);
         res.status(500).json({ error: 'Failed to update join policy' });
+    }
+});
+
+const CODE_VISIBILITY_MAX_MINUTES = 60 * 24 * 365;
+
+// PUT /api/sessions/:id/code-visibility — timer for guest code visibility (owner or site admin)
+router.put('/:id/code-visibility', authMiddleware, async (req, res) => {
+    try {
+        const mode = String(req.body.mode || '').toLowerCase();
+        const session = await Session.findOne({ sessionId: req.params.id });
+        if (!session) return res.status(404).json({ error: 'Session not found' });
+        if (!sessionIsOwnerOrSiteAdmin(session, req.user.id, req.user.role === 'admin')) {
+            return res.status(403).json({ error: 'Only the session owner or site admin can change code visibility' });
+        }
+
+        let message;
+        if (mode === 'forever') {
+            session.guestCodeVisibleUntil = null;
+            message = 'Guest code visibility set to forever';
+        } else if (mode === 'restore') {
+            session.guestCodeVisibleUntil = null;
+            message = 'Code is visible to guests again (forever)';
+        } else if (mode === 'timed') {
+            const minutes = Number(req.body.durationMinutes);
+            if (!Number.isFinite(minutes) || minutes <= 0 || minutes > CODE_VISIBILITY_MAX_MINUTES) {
+                return res.status(400).json({
+                    error: `durationMinutes must be between 1 and ${CODE_VISIBILITY_MAX_MINUTES}`
+                });
+            }
+            session.guestCodeVisibleUntil = new Date(Date.now() + minutes * 60 * 1000);
+            message = `Guests can view code for ${minutes} minute${minutes === 1 ? '' : 's'}`;
+        } else {
+            return res.status(400).json({ error: 'mode must be forever, restore, or timed' });
+        }
+
+        session.updatedAt = Date.now();
+        await session.save();
+        broadcastCodeVisibility(req, session);
+
+        res.json({
+            message,
+            guestCodeVisibleUntil: session.guestCodeVisibleUntil,
+            guestCodeVisibility: getGuestCodeVisibilityInfo(session),
+            session: sanitizeSessionForClient(session, viewerContext(req))
+        });
+    } catch (err) {
+        console.error('code-visibility error:', err);
+        res.status(500).json({ error: 'Failed to update code visibility' });
     }
 });
 

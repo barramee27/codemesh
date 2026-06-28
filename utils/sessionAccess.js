@@ -68,13 +68,60 @@ async function grantKeyAccess(session, userId) {
     }
 }
 
-function sanitizeSessionForClient(session) {
+function canViewSessionCode(session, userId, userRole) {
+    if (!session) return false;
+    if (isSiteAdmin(userRole)) return true;
+    if (!userId) return false;
+    if (isSessionOwner(session, userId)) return true;
+    if (!session.guestCodeVisibleUntil) return true;
+    return new Date() < new Date(session.guestCodeVisibleUntil);
+}
+
+function getGuestCodeVisibilityInfo(session) {
+    if (!session || !session.guestCodeVisibleUntil) {
+        return { status: 'forever', expiresAt: null, remainingMs: null };
+    }
+    const expiresAt = new Date(session.guestCodeVisibleUntil);
+    const remainingMs = expiresAt.getTime() - Date.now();
+    if (remainingMs > 0) {
+        return { status: 'visible', expiresAt, remainingMs };
+    }
+    return { status: 'hidden', expiresAt, remainingMs: 0 };
+}
+
+function redactSessionCodeForClient(obj) {
+    if (obj.files && Array.isArray(obj.files)) {
+        obj.files = obj.files.map((f) => ({ ...f, content: '' }));
+    }
+    obj.code = '';
+    obj.codeHiddenFromGuest = true;
+}
+
+function sanitizeSessionForClient(session, viewer) {
     const obj = session.toObject ? session.toObject() : { ...session };
     delete obj.classKeyHash;
     obj.requiresClassKey = session.isPublic === false;
     obj.hasClassKey = !!session.classKeyHash;
     obj.referencePdf = referencePdfForClient(session);
+    obj.guestCodeVisibleUntil = session.guestCodeVisibleUntil || null;
+    obj.guestCodeVisibility = getGuestCodeVisibilityInfo(session);
+
+    if (viewer && !canViewSessionCode(session, viewer.userId, viewer.userRole)) {
+        redactSessionCodeForClient(obj);
+    }
     return obj;
+}
+
+function redactClientFiles(filesMap) {
+    const out = {};
+    for (const [id, fileData] of Object.entries(filesMap || {})) {
+        out[id] = {
+            ...fileData,
+            doc: '',
+            content: ''
+        };
+    }
+    return out;
 }
 
 /**
@@ -136,6 +183,9 @@ module.exports = {
     sessionIsOwnerOrSiteAdmin: (session, userId, isAdmin) =>
         isAdmin || isSessionOwner(session, userId),
     canAccessSession,
+    canViewSessionCode,
+    getGuestCodeVisibilityInfo,
+    redactClientFiles,
     needsClassKey,
     hashClassKey,
     verifyClassKey,

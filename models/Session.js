@@ -84,6 +84,14 @@ const sessionSchema = new mongoose.Schema({
         type: Boolean,
         default: false
     },
+    /**
+     * When set, non-owner/non-admin users can view code until this time.
+     * null = forever (default). After expiry, code stays in DB but is hidden from guests.
+     */
+    guestCodeVisibleUntil: {
+        type: Date,
+        default: null
+    },
     /** Optional reference PDF for split view (owner or site admin). */
     referencePdf: {
         storageName: { type: String },

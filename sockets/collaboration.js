@@ -1,13 +1,15 @@
 const Session = require('../models/Session');
 const User = require('../models/User');
 const { transformOp, applyOp } = require('../utils/ot');
-const { ensureSessionAccess } = require('../utils/sessionAccess');
+const { ensureSessionAccess, getGuestCodeVisibilityInfo, redactClientFiles } = require('../utils/sessionAccess');
 const { referencePdfForClient } = require('../utils/sessionPdf');
 
 // In-memory state for active sessions
 const activeSessions = new Map();
 // Map of sessionId -> save timeout
 const saveTimers = new Map();
+// Map of sessionId -> guest code visibility expiry timer
+const visibilityTimers = new Map();
 
 // ─── Performance constants ───
 const MAX_USERS_PER_SESSION = (() => {
@@ -43,6 +45,55 @@ const USER_COLORS = [
 
 function getColor(index) {
     return USER_COLORS[index % USER_COLORS.length];
+}
+
+function socketCanViewCode(state, userInfo) {
+    if (!userInfo) return false;
+    if (userInfo.role === 'owner' || userInfo.role === 'admin') return true;
+    if (!state.guestCodeVisibleUntil) return true;
+    return new Date() < new Date(state.guestCodeVisibleUntil);
+}
+
+function clearVisibilityTimer(sessionId) {
+    const existing = visibilityTimers.get(sessionId);
+    if (existing) {
+        clearTimeout(existing);
+        visibilityTimers.delete(sessionId);
+    }
+}
+
+function scheduleVisibilityExpiry(sessionId, io) {
+    clearVisibilityTimer(sessionId);
+    const state = activeSessions.get(sessionId);
+    if (!state || !state.guestCodeVisibleUntil) return;
+
+    const expiresAt = new Date(state.guestCodeVisibleUntil).getTime();
+    const delay = expiresAt - Date.now();
+    if (delay <= 0) {
+        io.to(sessionId).emit('code-visibility-changed', {
+            guestCodeVisibleUntil: state.guestCodeVisibleUntil,
+            guestCodeVisibility: getGuestCodeVisibilityInfo({ guestCodeVisibleUntil: state.guestCodeVisibleUntil })
+        });
+        return;
+    }
+
+    const timer = setTimeout(() => {
+        visibilityTimers.delete(sessionId);
+        const mem = activeSessions.get(sessionId);
+        if (!mem || !mem.guestCodeVisibleUntil) return;
+        if (new Date() >= new Date(mem.guestCodeVisibleUntil)) {
+            io.to(sessionId).emit('code-visibility-changed', {
+                guestCodeVisibleUntil: mem.guestCodeVisibleUntil,
+                guestCodeVisibility: getGuestCodeVisibilityInfo({ guestCodeVisibleUntil: mem.guestCodeVisibleUntil })
+            });
+        }
+    }, Math.min(delay, 2147483647));
+    visibilityTimers.set(sessionId, timer);
+}
+
+function syncGuestCodeVisibilityState(state, dbSession) {
+    if (!state || !dbSession) return;
+    state.guestCodeVisibleUntil = dbSession.guestCodeVisibleUntil || null;
 }
 
 function dbFilesToMemoryMap(dbFiles) {
@@ -305,11 +356,16 @@ module.exports = function setupCollaboration(io) {
                 defaultJoinRole = dbSession.defaultJoinRole === 'viewer' ? 'viewer' : 'editor';
                 allowCollaboratorCopy = dbSession.allowCollaboratorCopy === true;
                 referencePdf = referencePdfForClient(dbSession);
+                syncGuestCodeVisibilityState(state, dbSession);
             }
+
+            const joiningUser = state.users.get(socket.id);
+            const canViewCode = socketCanViewCode(state, joiningUser);
+            const clientFilesForJoin = canViewCode ? clientFiles : redactClientFiles(clientFiles);
 
             // Send current state to joining client
             socket.emit('session-state', {
-                files: clientFiles,
+                files: clientFilesForJoin,
                 users: Object.fromEntries(state.users),
                 role: userRole,
                 comments: state.comments,
@@ -317,8 +373,13 @@ module.exports = function setupCollaboration(io) {
                 defaultJoinRole,
                 allowCollaboratorCopy,
                 referencePdf,
-                pdfSplitVisible: !!referencePdf
+                pdfSplitVisible: !!referencePdf,
+                guestCodeVisibleUntil: state.guestCodeVisibleUntil || null,
+                guestCodeVisibility: getGuestCodeVisibilityInfo({ guestCodeVisibleUntil: state.guestCodeVisibleUntil }),
+                codeHiddenFromGuest: !canViewCode
             });
+
+            scheduleVisibilityExpiry(sessionId, io);
 
             // Notify others
             socket.to(sessionId).emit('user-joined', {
@@ -347,6 +408,12 @@ module.exports = function setupCollaboration(io) {
                 });
                 return;
             }
+            if (userInfo && !socketCanViewCode(state, userInfo)) {
+                socket.emit('readonly-error', {
+                    message: 'Code is hidden — the visibility timer has expired for guests.'
+                });
+                return;
+            }
 
             // Transform against concurrent ops if needed
             let transformedOp = { ...op, clientId: socket.id };
@@ -371,12 +438,16 @@ module.exports = function setupCollaboration(io) {
             }
 
             // Broadcast to others in the session (sender already has the change)
-            socket.to(sessionId).emit('remote-change', {
-                fileId,
-                op: transformedOp,
-                version: file.version,
-                userId: socket.id
-            });
+            for (const [peerSocketId, peerInfo] of state.users) {
+                if (peerSocketId === socket.id) continue;
+                if (!socketCanViewCode(state, peerInfo)) continue;
+                io.to(peerSocketId).emit('remote-change', {
+                    fileId,
+                    op: transformedOp,
+                    version: file.version,
+                    userId: socket.id
+                });
+            }
 
             // Acknowledge to sender
             socket.emit('ack', { fileId, version: file.version });
@@ -682,6 +753,43 @@ module.exports = function setupCollaboration(io) {
             }
         });
 
+        socket.on('set-code-visibility', async (data) => {
+            const { sessionId, mode, durationMinutes } = data || {};
+            if (!sessionId || !mode) return;
+            const mem = activeSessions.get(sessionId);
+            if (!mem) return;
+            const requester = mem.users.get(socket.id);
+            if (!requester || (requester.role !== 'owner' && requester.role !== 'admin')) return;
+
+            try {
+                const dbSession = await Session.findOne({ sessionId });
+                if (!dbSession) return;
+
+                const normalizedMode = String(mode).toLowerCase();
+                if (normalizedMode === 'forever' || normalizedMode === 'restore') {
+                    dbSession.guestCodeVisibleUntil = null;
+                } else if (normalizedMode === 'timed') {
+                    const minutes = Number(durationMinutes);
+                    if (!Number.isFinite(minutes) || minutes <= 0) return;
+                    dbSession.guestCodeVisibleUntil = new Date(Date.now() + minutes * 60 * 1000);
+                } else {
+                    return;
+                }
+
+                dbSession.updatedAt = Date.now();
+                await dbSession.save();
+                syncGuestCodeVisibilityState(mem, dbSession);
+
+                io.to(sessionId).emit('code-visibility-changed', {
+                    guestCodeVisibleUntil: dbSession.guestCodeVisibleUntil || null,
+                    guestCodeVisibility: getGuestCodeVisibilityInfo(dbSession)
+                });
+                scheduleVisibilityExpiry(sessionId, io);
+            } catch (err) {
+                console.error('set-code-visibility:', err.message);
+            }
+        });
+
         socket.on('request-state', async (data) => {
             const { sessionId } = data;
             if (!sessionId || socket.sessionId !== sessionId) return;
@@ -708,10 +816,15 @@ module.exports = function setupCollaboration(io) {
                     defaultJoinRole = dbSession.defaultJoinRole === 'viewer' ? 'viewer' : 'editor';
                     allowCollaboratorCopy = dbSession.allowCollaboratorCopy === true;
                     referencePdf = referencePdfForClient(dbSession);
+                    syncGuestCodeVisibilityState(state, dbSession);
                 }
             } catch (err) { /* ignore */ }
+
+            const canViewCode = socketCanViewCode(state, userInfo);
+            const clientFilesForUser = canViewCode ? clientFiles : redactClientFiles(clientFiles);
+
             socket.emit('session-state', {
-                files: clientFiles,
+                files: clientFilesForUser,
                 users: Object.fromEntries(state.users),
                 role: userInfo.role,
                 comments: state.comments,
@@ -719,7 +832,10 @@ module.exports = function setupCollaboration(io) {
                 defaultJoinRole,
                 allowCollaboratorCopy,
                 referencePdf,
-                pdfSplitVisible: !!referencePdf
+                pdfSplitVisible: !!referencePdf,
+                guestCodeVisibleUntil: state.guestCodeVisibleUntil || null,
+                guestCodeVisibility: getGuestCodeVisibilityInfo({ guestCodeVisibleUntil: state.guestCodeVisibleUntil }),
+                codeHiddenFromGuest: !canViewCode
             });
         });
 
@@ -750,6 +866,7 @@ module.exports = function setupCollaboration(io) {
                                 const final = activeSessions.get(sessionId);
                                 if (final && final.users.size === 0) {
                                     activeSessions.delete(sessionId);
+                                    clearVisibilityTimer(sessionId);
                                     
                                     // Check if session owner was a guest and delete guest account if no sessions remain
                                     try {
