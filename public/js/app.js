@@ -29,6 +29,10 @@
         tabOrder: [], // display order for open tabs (drag to reorder)
         defaultJoinRole: 'editor', // default for new guests (owner sets)
         allowCollaboratorCopy: false, // owner/admin can allow guests to copy code
+        guestCodeVisibleUntil: null,
+        guestCodeVisibility: { status: 'forever', expiresAt: null, remainingMs: null },
+        codeHiddenFromGuest: false,
+        codeVisibilityCountdownTimer: null,
         referencePdf: null, // { url, originalName } | null
         pdfSplitVisible: false,
         sessionOwnerId: null,
@@ -1215,6 +1219,234 @@
         return !!(state.sessionOwnerId && uid && state.sessionOwnerId.toString() === uid.toString());
     }
 
+    function userCanViewSessionCode() {
+        if (state.userRole === 'owner' || state.userRole === 'admin') return true;
+        if (state.user && state.user.role === 'admin') return true;
+        if (state.codeHiddenFromGuest) return false;
+        if (!state.guestCodeVisibleUntil) return true;
+        return Date.now() < new Date(state.guestCodeVisibleUntil).getTime();
+    }
+
+    function formatVisibilityRemaining(ms) {
+        if (!Number.isFinite(ms) || ms <= 0) return 'Expired';
+        const totalSec = Math.ceil(ms / 1000);
+        const h = Math.floor(totalSec / 3600);
+        const m = Math.floor((totalSec % 3600) / 60);
+        const s = totalSec % 60;
+        if (h > 0) return `${h}h ${m}m left`;
+        if (m > 0) return `${m}m ${s}s left`;
+        return `${s}s left`;
+    }
+
+    function stopCodeVisibilityCountdown() {
+        if (state.codeVisibilityCountdownTimer) {
+            clearInterval(state.codeVisibilityCountdownTimer);
+            state.codeVisibilityCountdownTimer = null;
+        }
+    }
+
+    function refreshGuestCodeVisibilityStatus() {
+        if (!state.guestCodeVisibleUntil) {
+            state.guestCodeVisibility = { status: 'forever', expiresAt: null, remainingMs: null };
+            return;
+        }
+        const expiresAt = new Date(state.guestCodeVisibleUntil);
+        const remainingMs = expiresAt.getTime() - Date.now();
+        if (remainingMs > 0) {
+            state.guestCodeVisibility = { status: 'visible', expiresAt, remainingMs };
+        } else {
+            state.guestCodeVisibility = { status: 'hidden', expiresAt, remainingMs: 0 };
+        }
+    }
+
+    function startCodeVisibilityCountdown() {
+        stopCodeVisibilityCountdown();
+        refreshGuestCodeVisibilityStatus();
+        updateCodeVisibilityUI();
+        if (!state.guestCodeVisibleUntil) return;
+
+        state.codeVisibilityCountdownTimer = setInterval(() => {
+            const wasVisible = userCanViewSessionCode();
+            refreshGuestCodeVisibilityStatus();
+            updateCodeVisibilityUI();
+
+            const nowVisible = userCanViewSessionCode();
+            if (wasVisible && !nowVisible && !userCanManageSessionSettings()) {
+                state.codeHiddenFromGuest = true;
+                applyGuestCodeHiddenState(true);
+                showToast('Code visibility has expired for guests', 'info');
+            }
+        }, 1000);
+    }
+
+    function updateCodeHiddenOverlay() {
+        const container = document.getElementById('editor-container');
+        if (!container) return;
+        const hidden = !userCanViewSessionCode();
+        const existing = container.querySelector('.code-hidden-overlay');
+
+        if (hidden && !existing) {
+            const overlay = document.createElement('div');
+            overlay.className = 'code-hidden-overlay';
+            overlay.textContent = userCanManageSessionSettings()
+                ? 'Code is hidden from guests (you still see it as owner/admin)'
+                : 'Code is no longer visible — the owner hid it or the timer expired';
+            container.style.position = 'relative';
+            container.appendChild(overlay);
+            if (state.editorView) state.editorView.updateOptions({ readOnly: true });
+        } else if (!hidden && existing) {
+            existing.remove();
+            if (state.userRole === 'viewer') setEditorReadOnly(true);
+            else if (userCanEditSession()) setEditorReadOnly(false);
+        } else if (hidden && existing && userCanManageSessionSettings()) {
+            existing.textContent = 'Code is hidden from guests (you still see it as owner/admin)';
+        }
+    }
+
+    function applyGuestCodeHiddenState(hidden) {
+        if (!hidden || userCanManageSessionSettings()) {
+            updateCodeHiddenOverlay();
+            return;
+        }
+
+        for (const file of state.files.values()) {
+            file.doc = '';
+        }
+        if (state.activeFileId && state.editorView) {
+            const model = state.editorView.getModel();
+            if (model) model.setValue('');
+        }
+        updateCodeHiddenOverlay();
+        setEditorReadOnly(true);
+    }
+
+    function updateCodeVisibilityUI() {
+        const wrap = document.getElementById('code-visibility-wrap');
+        const toggle = document.getElementById('code-visibility-toggle');
+        const controls = document.getElementById('code-visibility-controls');
+        const statusEl = document.getElementById('code-visibility-status');
+        const foreverBtn = document.getElementById('code-visibility-forever-btn');
+        const restoreBtn = document.getElementById('code-visibility-restore-btn');
+        if (!wrap || !toggle) return;
+
+        const canManage = userCanManageSessionSettings();
+        wrap.style.display = canManage ? '' : 'none';
+        if (!canManage) return;
+
+        refreshGuestCodeVisibilityStatus();
+        const vis = state.guestCodeVisibility || { status: 'forever' };
+        const timerEnabled = vis.status === 'visible';
+
+        toggle.checked = timerEnabled;
+        if (controls) controls.style.display = timerEnabled ? '' : 'none';
+
+        if (foreverBtn) {
+            foreverBtn.style.display = state.guestCodeVisibleUntil ? '' : 'none';
+        }
+        if (restoreBtn) {
+            restoreBtn.style.display = vis.status === 'hidden' ? '' : 'none';
+        }
+        if (statusEl) {
+            if (vis.status === 'forever') statusEl.textContent = 'Forever (default)';
+            else if (vis.status === 'visible') statusEl.textContent = formatVisibilityRemaining(vis.remainingMs);
+            else statusEl.textContent = 'Hidden from guests';
+        }
+    }
+
+    async function updateGuestCodeVisibility(mode, durationMinutes) {
+        if (!state.currentSession || !userCanManageSessionSettings()) return;
+
+        try {
+            const payload = { mode };
+            if (mode === 'timed') payload.durationMinutes = durationMinutes;
+
+            if (state.socket && state.socket.connected) {
+                state.socket.emit('set-code-visibility', {
+                    sessionId: state.currentSession,
+                    ...payload
+                });
+            } else {
+                await api(`/sessions/${state.currentSession}/code-visibility`, {
+                    method: 'PUT',
+                    body: JSON.stringify(payload)
+                });
+            }
+
+            if (mode === 'forever' || mode === 'restore') {
+                state.guestCodeVisibleUntil = null;
+                state.codeHiddenFromGuest = false;
+            } else if (mode === 'timed') {
+                state.guestCodeVisibleUntil = new Date(Date.now() + durationMinutes * 60 * 1000).toISOString();
+                state.codeHiddenFromGuest = false;
+            }
+            refreshGuestCodeVisibilityStatus();
+            startCodeVisibilityCountdown();
+            updateCodeHiddenOverlay();
+
+            const messages = {
+                forever: 'Guest code visibility set to forever',
+                restore: 'Code is visible to guests again',
+                timed: `Guests can view code for ${durationMinutes} minute${durationMinutes === 1 ? '' : 's'}`
+            };
+            showToast(messages[mode] || 'Code visibility updated', 'success');
+        } catch (err) {
+            showToast(err.message || 'Failed to update code visibility', 'error');
+        }
+    }
+
+    function getSelectedVisibilityMinutes() {
+        const sel = document.getElementById('code-visibility-duration');
+        const custom = document.getElementById('code-visibility-custom-minutes');
+        if (!sel) return null;
+        if (sel.value === 'custom') {
+            const minutes = Number(custom && custom.value);
+            if (!Number.isFinite(minutes) || minutes <= 0) return null;
+            return Math.min(525600, Math.floor(minutes));
+        }
+        return Number(sel.value);
+    }
+
+    function applyCodeVisibilityMeta(meta) {
+        if (!meta) return;
+        if (meta.guestCodeVisibleUntil !== undefined) {
+            state.guestCodeVisibleUntil = meta.guestCodeVisibleUntil;
+        }
+        if (meta.guestCodeVisibility) {
+            state.guestCodeVisibility = meta.guestCodeVisibility;
+        }
+        if (meta.codeHiddenFromGuest !== undefined) {
+            state.codeHiddenFromGuest = !!meta.codeHiddenFromGuest;
+        }
+        refreshGuestCodeVisibilityStatus();
+        startCodeVisibilityCountdown();
+        updateCodeVisibilityUI();
+        if (!userCanViewSessionCode() && !userCanManageSessionSettings()) {
+            applyGuestCodeHiddenState(true);
+        } else {
+            updateCodeHiddenOverlay();
+        }
+    }
+
+    function handleCodeVisibilityChanged(data) {
+        if (!data) return;
+        const prevCanView = userCanViewSessionCode();
+        applyCodeVisibilityMeta({
+            guestCodeVisibleUntil: data.guestCodeVisibleUntil,
+            guestCodeVisibility: data.guestCodeVisibility,
+            codeHiddenFromGuest: data.guestCodeVisibility && data.guestCodeVisibility.status === 'hidden'
+        });
+
+        const nowCanView = userCanViewSessionCode();
+        if (!prevCanView && nowCanView && !userCanManageSessionSettings()) {
+            if (state.socket && state.currentSession) {
+                state.socket.emit('request-state', { sessionId: state.currentSession });
+            }
+            showToast('Code is visible again', 'info');
+        } else if (prevCanView && !nowCanView && !userCanManageSessionSettings()) {
+            showToast('Code is no longer visible for guests', 'info');
+        }
+    }
+
     function getDashboardClassKey() {
         const el = document.getElementById('join-class-key-input');
         return el ? el.value.trim() : '';
@@ -1528,6 +1760,9 @@
         }
         if (meta.hasClassKey !== undefined) {
             state.sessionHasClassKey = !!meta.hasClassKey;
+        }
+        if (meta.guestCodeVisibleUntil !== undefined || meta.guestCodeVisibility || meta.codeHiddenFromGuest !== undefined) {
+            applyCodeVisibilityMeta(meta);
         }
         updateJoinPolicyUI();
         updateCopyPolicyUI();
@@ -2845,7 +3080,10 @@
                 pdfSplitVisible: sessionData.referencePdf ? true : false,
                 owner: sessionData.owner,
                 isPublic: sessionData.isPublic,
-                hasClassKey: sessionData.hasClassKey
+                hasClassKey: sessionData.hasClassKey,
+                guestCodeVisibleUntil: sessionData.guestCodeVisibleUntil,
+                guestCodeVisibility: sessionData.guestCodeVisibility,
+                codeHiddenFromGuest: sessionData.codeHiddenFromGuest
             });
 
             // Connect WebSocket
@@ -2865,6 +3103,7 @@
 
     // ─── WebSocket Connection ───
     function connectSocket(sessionId, sessionData, classKey) {
+        stopCodeVisibilityCountdown();
         if (state.socket) {
             state.socket.disconnect();
         }
@@ -2893,9 +3132,12 @@
                 defaultJoinRole: data.defaultJoinRole,
                 allowCollaboratorCopy: data.allowCollaboratorCopy,
                 referencePdf: data.referencePdf,
-                pdfSplitVisible: data.pdfSplitVisible
+                pdfSplitVisible: data.pdfSplitVisible,
+                guestCodeVisibleUntil: data.guestCodeVisibleUntil,
+                guestCodeVisibility: data.guestCodeVisibility,
+                codeHiddenFromGuest: data.codeHiddenFromGuest
             });
-            setEditorReadOnly(state.userRole === 'viewer');
+            setEditorReadOnly(state.userRole === 'viewer' || !userCanViewSessionCode());
             updateSessionCopyRestrictions();
 
             if (data.comments) {
@@ -3039,6 +3281,10 @@
                     'info'
                 );
             }
+        });
+
+        state.socket.on('code-visibility-changed', (data) => {
+            handleCodeVisibilityChanged(data);
         });
 
         state.socket.on('access-settings-changed', (data) => {
@@ -3892,6 +4138,7 @@
         if (!document.getElementById('back-to-dashboard') || !document.getElementById('panel-tabs')) return;
         const backBtn = document.getElementById('back-to-dashboard');
         backBtn.addEventListener('click', () => {
+            stopCodeVisibilityCountdown();
             if (state.socket) { state.socket.disconnect(); state.socket = null; }
             disableEditorSplit();
             if (state.editorView) { state.editorView.dispose(); state.editorView = null; }
@@ -3980,6 +4227,31 @@
         });
         document.getElementById('copy-policy-toggle')?.addEventListener('change', (e) => {
             setAllowCollaboratorCopy(e.target.checked);
+        });
+        document.getElementById('code-visibility-toggle')?.addEventListener('change', (e) => {
+            const controls = document.getElementById('code-visibility-controls');
+            if (controls) controls.style.display = e.target.checked ? '' : 'none';
+            if (!e.target.checked) updateGuestCodeVisibility('forever');
+        });
+        document.getElementById('code-visibility-duration')?.addEventListener('change', (e) => {
+            const custom = document.getElementById('code-visibility-custom-minutes');
+            if (custom) custom.style.display = e.target.value === 'custom' ? '' : 'none';
+        });
+        document.getElementById('code-visibility-apply-btn')?.addEventListener('click', () => {
+            const minutes = getSelectedVisibilityMinutes();
+            if (!minutes) {
+                showToast('Choose a duration or enter custom minutes', 'error');
+                return;
+            }
+            document.getElementById('code-visibility-toggle').checked = true;
+            updateGuestCodeVisibility('timed', minutes);
+        });
+        document.getElementById('code-visibility-forever-btn')?.addEventListener('click', () => {
+            document.getElementById('code-visibility-toggle').checked = false;
+            updateGuestCodeVisibility('forever');
+        });
+        document.getElementById('code-visibility-restore-btn')?.addEventListener('click', () => {
+            updateGuestCodeVisibility('restore');
         });
         document.getElementById('session-access-select')?.addEventListener('change', () => {
             const keyInput = document.getElementById('session-class-key-input');
