@@ -1269,54 +1269,97 @@
             const wasVisible = userCanViewSessionCode();
             refreshGuestCodeVisibilityStatus();
             updateCodeVisibilityUI();
+            updateCodeRestrictedUI();
 
             const nowVisible = userCanViewSessionCode();
             if (wasVisible && !nowVisible && !userCanManageSessionSettings()) {
                 state.codeHiddenFromGuest = true;
                 applyGuestCodeHiddenState(true);
-                showToast('Code visibility has expired for guests', 'info');
+                showToast('Guest code viewing has ended — files are still here, but contents are restricted', 'info');
             }
         }, 1000);
     }
 
-    function updateCodeHiddenOverlay() {
-        const container = document.getElementById('editor-container');
-        if (!container) return;
-        const hidden = !userCanViewSessionCode();
-        const existing = container.querySelector('.code-hidden-overlay');
+    function getRestrictedFileSummary() {
+        const files = Array.from(state.files.values());
+        if (!files.length) return 'This session has workspace files, but their contents are hidden.';
+        const names = files.map((f) => f.name).slice(0, 6);
+        const extra = files.length > names.length ? ` (+${files.length - names.length} more)` : '';
+        return `Files in this session: ${names.join(', ')}${extra}`;
+    }
 
-        if (hidden && !existing) {
-            const overlay = document.createElement('div');
-            overlay.className = 'code-hidden-overlay';
-            overlay.textContent = userCanManageSessionSettings()
-                ? 'Code is hidden from guests (you still see it as owner/admin)'
-                : 'Code is no longer visible — the owner hid it or the timer expired';
-            container.style.position = 'relative';
-            container.appendChild(overlay);
-            if (state.editorView) state.editorView.updateOptions({ readOnly: true });
-        } else if (!hidden && existing) {
-            existing.remove();
-            if (state.userRole === 'viewer') setEditorReadOnly(true);
-            else if (userCanEditSession()) setEditorReadOnly(false);
-        } else if (hidden && existing && userCanManageSessionSettings()) {
-            existing.textContent = 'Code is hidden from guests (you still see it as owner/admin)';
+    function updateCodeRestrictedUI() {
+        const bar = document.getElementById('code-restricted-bar');
+        const barText = document.getElementById('code-restricted-bar-text');
+        const placeholder = document.getElementById('code-restricted-placeholder');
+        const summary = document.getElementById('code-restricted-file-summary');
+        const container = document.getElementById('editor-container');
+        const primaryPane = document.getElementById('editor-split-pane-primary');
+        if (!bar || !placeholder || !container || !primaryPane) return;
+
+        refreshGuestCodeVisibilityStatus();
+        const vis = state.guestCodeVisibility || { status: 'forever' };
+        const guestViewBlocked = vis.status === 'hidden';
+        const canView = userCanViewSessionCode();
+        const isOwner = userCanManageSessionSettings();
+
+        if (!guestViewBlocked && canView) {
+            bar.style.display = 'none';
+            placeholder.style.display = 'none';
+            placeholder.setAttribute('aria-hidden', 'true');
+            container.style.display = '';
+            primaryPane.classList.remove('code-view-restricted');
+            bar.classList.remove('code-restricted-bar--owner');
+            return;
+        }
+
+        bar.style.display = '';
+        if (isOwner) {
+            bar.classList.add('code-restricted-bar--owner');
+            if (barText) {
+                barText.textContent = guestViewBlocked
+                    ? 'Guests cannot view code right now. You still have full access as owner/admin.'
+                    : `Guest view timer active — ${formatVisibilityRemaining(vis.remainingMs)} remaining for guests.`;
+            }
+            placeholder.style.display = 'none';
+            placeholder.setAttribute('aria-hidden', 'true');
+            container.style.display = '';
+            primaryPane.classList.remove('code-view-restricted');
+            return;
+        }
+
+        bar.classList.remove('code-restricted-bar--owner');
+        if (barText) {
+            barText.textContent = 'This session has code, but guest viewing is currently restricted.';
+        }
+        placeholder.style.display = '';
+        placeholder.setAttribute('aria-hidden', 'false');
+        primaryPane.classList.add('code-view-restricted');
+        if (summary) summary.textContent = getRestrictedFileSummary();
+
+        if (state.editorView) {
+            state.editorView.dispose();
+            state.editorView = null;
         }
     }
 
     function applyGuestCodeHiddenState(hidden) {
-        if (!hidden || userCanManageSessionSettings()) {
-            updateCodeHiddenOverlay();
+        if (!hidden) {
+            updateCodeRestrictedUI();
+            if (state.activeFileId && state.files.has(state.activeFileId) && userCanViewSessionCode()) {
+                openFileInPrimary(state.activeFileId);
+            }
             return;
         }
 
-        for (const file of state.files.values()) {
-            file.doc = '';
+        if (!userCanManageSessionSettings()) {
+            for (const file of state.files.values()) {
+                file.doc = '';
+            }
         }
-        if (state.activeFileId && state.editorView) {
-            const model = state.editorView.getModel();
-            if (model) model.setValue('');
-        }
-        updateCodeHiddenOverlay();
+        updateCodeRestrictedUI();
+        renderFileTree();
+        renderTabs();
         setEditorReadOnly(true);
     }
 
@@ -1381,7 +1424,7 @@
             }
             refreshGuestCodeVisibilityStatus();
             startCodeVisibilityCountdown();
-            updateCodeHiddenOverlay();
+            updateCodeRestrictedUI();
 
             const messages = {
                 forever: 'Guest code visibility set to forever',
@@ -1423,7 +1466,7 @@
         if (!userCanViewSessionCode() && !userCanManageSessionSettings()) {
             applyGuestCodeHiddenState(true);
         } else {
-            updateCodeHiddenOverlay();
+            updateCodeRestrictedUI();
         }
     }
 
@@ -3714,6 +3757,17 @@
         state.focusedPane = 'primary';
 
         const file = state.files.get(fileId);
+
+        if (!userCanViewSessionCode() && !userCanManageSessionSettings()) {
+            updateCodeRestrictedUI();
+            file.language = resolveEditorLanguage(file, file.doc);
+            updateStatusbarLanguage(file.language);
+            renderFileTree();
+            renderTabs();
+            updateSplitLayout();
+            return;
+        }
+
         const container = document.getElementById('editor-container');
         if (state.editorView) state.editorView.dispose();
         state.editorView = mountEditorInContainer(container, fileId);

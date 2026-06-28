@@ -811,6 +811,19 @@
         <div class="editor-content-wrapper" id="editor-wrapper">
           <div id="editor-split-container" class="editor-split-container">
             <div class="editor-split-pane editor-split-pane-primary" id="editor-split-pane-primary" data-pane="primary">
+              <div id="code-restricted-bar" class="code-restricted-bar" style="display:none;" role="status" aria-live="polite">
+                <i class="codicon codicon-lock" aria-hidden="true"></i>
+                <span id="code-restricted-bar-text"></span>
+              </div>
+              <div id="code-restricted-placeholder" class="code-restricted-placeholder" style="display:none;" aria-hidden="true">
+                <div class="code-restricted-placeholder-inner">
+                  <i class="codicon codicon-lock code-restricted-placeholder-icon" aria-hidden="true"></i>
+                  <h3 class="code-restricted-placeholder-title">Code view restricted</h3>
+                  <p class="code-restricted-placeholder-lead">This session contains code, but the owner has limited guest viewing. Your files are still here — only the contents are hidden.</p>
+                  <p id="code-restricted-file-summary" class="code-restricted-file-summary"></p>
+                  <p class="code-restricted-placeholder-hint">Ask the session owner if you need access restored.</p>
+                </div>
+              </div>
               <div id="editor-container" class="editor-container"></div>
             </div>
             <div id="editor-code-split-splitter" class="pane-splitter pane-splitter-vertical" role="separator"
