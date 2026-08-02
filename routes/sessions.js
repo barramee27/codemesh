@@ -30,6 +30,23 @@ const {
     extensionForKind
 } = require('../utils/sessionPdf');
 
+let HTMLtoDOCX = null;
+try {
+    HTMLtoDOCX = require('html-to-docx');
+} catch (err) {
+    console.warn('html-to-docx not available:', err.message);
+}
+
+const MAX_EDITED_HTML_BYTES = 2 * 1024 * 1024;
+
+function sanitizeDocHtml(html) {
+    return String(html || '')
+        .replace(/<script[\s\S]*?>[\s\S]*?<\/script>/gi, '')
+        .replace(/<iframe[\s\S]*?>[\s\S]*?<\/iframe>/gi, '')
+        .replace(/\son\w+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, '')
+        .replace(/javascript:/gi, '');
+}
+
 const UPLOADS_DIR = path.join(__dirname, '..', 'uploads');
 if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true });
 
@@ -615,7 +632,8 @@ router.post('/:id/pdf', authMiddleware, pdfUpload.single('pdf'), async (req, res
             storageName: req.file.filename,
             originalName,
             mimeType: req.file.mimetype || null,
-            uploadedAt: new Date()
+            uploadedAt: new Date(),
+            editedHtml: undefined
         };
         session.updatedAt = Date.now();
         await session.save();
@@ -628,6 +646,86 @@ router.post('/:id/pdf', authMiddleware, pdfUpload.single('pdf'), async (req, res
     } catch (err) {
         console.error('session document upload:', err);
         res.status(500).json({ error: err.message || 'Failed to upload document' });
+    }
+});
+
+// PUT /api/sessions/:id/docx-html — save in-app DOCX text edits
+router.put('/:id/docx-html', authMiddleware, async (req, res) => {
+    try {
+        if (!HTMLtoDOCX) {
+            return res.status(503).json({ error: 'DOCX save is not available on this server' });
+        }
+        const session = await Session.findOne({ sessionId: req.params.id });
+        if (!session) return res.status(404).json({ error: 'Session not found' });
+
+        const canEdit = sessionCanEdit(session, req.user.id, req.user.role === 'admin')
+            || sessionIsOwnerOrSiteAdmin(session, req.user.id, req.user.role === 'admin');
+        if (!canEdit) {
+            return res.status(403).json({ error: 'You do not have permission to edit this document' });
+        }
+
+        if (!session.referencePdf || !session.referencePdf.storageName) {
+            return res.status(400).json({ error: 'No reference document attached' });
+        }
+        const kind = detectReferenceKind(session.referencePdf.originalName, session.referencePdf.mimeType);
+        if (kind !== 'docx' && kind !== 'doc') {
+            return res.status(400).json({ error: 'Only Word documents (.docx) can be edited as text here' });
+        }
+
+        const cleaned = sanitizeDocHtml(req.body && req.body.html);
+        if (!cleaned.trim()) {
+            return res.status(400).json({ error: 'Document content is empty' });
+        }
+        if (Buffer.byteLength(cleaned, 'utf8') > MAX_EDITED_HTML_BYTES) {
+            return res.status(400).json({ error: 'Document is too large to save' });
+        }
+
+        const title = normalizeUtf8Text(session.referencePdf.originalName) || 'document.docx';
+        const fullHtml = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${title.replace(/</g, '')}</title></head><body>${cleaned}</body></html>`;
+        const buffer = await HTMLtoDOCX(fullHtml, null, {
+            title,
+            creator: 'CodeMesh',
+            font: 'Noto Sans Thai',
+            lang: 'th-TH',
+            decodeUnicode: true
+        });
+
+        const sid = path.basename(session.sessionId || 'session');
+        const storageName = `session-${sid}-ref-${Date.now()}.docx`;
+        const outPath = path.join(UPLOADS_DIR, storageName);
+        fs.writeFileSync(outPath, Buffer.from(buffer));
+
+        if (session.referencePdf.storageName) {
+            const oldPath = path.join(UPLOADS_DIR, session.referencePdf.storageName);
+            if (fs.existsSync(oldPath) && oldPath !== outPath) {
+                try { fs.unlinkSync(oldPath); } catch (_) { /* ignore */ }
+            }
+        }
+
+        let originalName = session.referencePdf.originalName || 'document.docx';
+        if (!/\.docx$/i.test(originalName)) {
+            originalName = originalName.replace(/\.doc$/i, '') + '.docx';
+        }
+
+        session.referencePdf = {
+            storageName,
+            originalName: normalizeUtf8Text(originalName) || 'document.docx',
+            mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            uploadedAt: new Date(),
+            editedHtml: cleaned
+        };
+        session.updatedAt = Date.now();
+        await session.save();
+
+        const referencePdf = referencePdfPayload(session);
+        broadcastReferencePdf(req, session.sessionId, referencePdf);
+        res.json({
+            message: 'Document saved',
+            referencePdf
+        });
+    } catch (err) {
+        console.error('session docx-html save:', err);
+        res.status(500).json({ error: err.message || 'Failed to save document' });
     }
 });
 

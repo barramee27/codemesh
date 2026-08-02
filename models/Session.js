@@ -97,7 +97,9 @@ const sessionSchema = new mongoose.Schema({
         storageName: { type: String },
         originalName: { type: String },
         mimeType: { type: String },
-        uploadedAt: { type: Date }
+        uploadedAt: { type: Date },
+        /** Saved HTML from in-app DOCX editing (preferred over re-parsing the file). */
+        editedHtml: { type: String }
     },
     createdAt: {
         type: Date,

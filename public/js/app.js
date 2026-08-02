@@ -430,6 +430,13 @@
         docKey: null
     };
 
+    const docxEdit = {
+        active: false,
+        dirty: false,
+        saving: false,
+        bound: false
+    };
+
     function sessionPdfAbsoluteUrl(url) {
         if (!url) return '';
         return url.startsWith('http') ? url : (window.location.origin + url);
@@ -634,6 +641,10 @@
             tool = null;
         }
 
+        if (tool && docxEdit.active) {
+            docxEdit.active = false;
+        }
+
         if (tool == null) {
             docAnnotate.tool = null;
         } else if (docAnnotate.tool === tool) {
@@ -658,6 +669,7 @@
                 hint.hidden = true;
             }
         }
+        updateDocxEditToolbar();
         resizeAnnotateCanvas();
     }
 
@@ -756,6 +768,19 @@
             iframe.removeAttribute('src');
         }
         wrap.hidden = false;
+
+        const savedHtml = state.referencePdf && state.referencePdf.editedHtml;
+        if (savedHtml) {
+            content.innerHTML = savedHtml;
+            updatePdfZoomLabel();
+            placeAnnotateCanvas();
+            requestAnimationFrame(() => {
+                resizeAnnotateCanvas();
+                updateDocxEditToolbar();
+            });
+            return;
+        }
+
         content.innerHTML = '<p style="opacity:0.7">Loading Word document…</p>';
         const ok = await loadMammothIfNeeded();
         if (!ok) {
@@ -772,16 +797,130 @@
             placeAnnotateCanvas();
             requestAnimationFrame(() => {
                 resizeAnnotateCanvas();
-                // Images can change page height after load
                 content.querySelectorAll('img').forEach((img) => {
                     if (!img.complete) {
                         img.addEventListener('load', () => resizeAnnotateCanvas(), { once: true });
                     }
                 });
+                updateDocxEditToolbar();
             });
         } catch (err) {
             content.innerHTML = `<p>Failed to render DOCX: ${escapeHtml(err.message || 'unknown error')}</p>`;
         }
+    }
+
+    function canEditDocxText() {
+        return userCanEditSession()
+            && state.referencePdf
+            && getReferenceDocKind(state.referencePdf) === 'docx'
+            && isDocxAnnotateMode();
+    }
+
+    function updateDocxEditToolbar() {
+        const editBtn = document.getElementById('doc-text-edit-toggle');
+        const saveBtn = document.getElementById('doc-text-save');
+        const show = !!(state.referencePdf
+            && getReferenceDocKind(state.referencePdf) === 'docx'
+            && document.getElementById('session-docx-viewer')
+            && !document.getElementById('session-docx-viewer').hidden
+            && userCanEditSession());
+        if (editBtn) {
+            editBtn.style.display = show ? '' : 'none';
+            editBtn.classList.toggle('active', !!docxEdit.active);
+            editBtn.title = docxEdit.active ? 'Stop editing text' : 'Edit document text';
+        }
+        if (saveBtn) {
+            saveBtn.style.display = show ? '' : 'none';
+            saveBtn.disabled = !docxEdit.dirty || docxEdit.saving;
+            saveBtn.title = docxEdit.saving ? 'Saving…' : (docxEdit.dirty ? 'Save document text' : 'No changes to save');
+        }
+        const content = document.getElementById('session-docx-content');
+        if (content) {
+            const editable = show && docxEdit.active && !docAnnotate.tool;
+            content.contentEditable = editable ? 'true' : 'false';
+            content.classList.toggle('docx-editing', editable);
+            content.spellcheck = editable;
+        }
+    }
+
+    function setDocxEditMode(force) {
+        if (!canEditDocxText() && force !== false) {
+            showToast('Only editors can edit this document', 'info');
+            return;
+        }
+        const next = typeof force === 'boolean' ? force : !docxEdit.active;
+        if (next && docAnnotate.tool) setDocAnnotateTool(null);
+        docxEdit.active = next;
+        updateDocxEditToolbar();
+        if (docxEdit.active) {
+            const content = document.getElementById('session-docx-content');
+            content?.focus();
+            showToast('Text edit on — click in the document to type. Save when done.', 'info');
+        }
+        requestAnimationFrame(() => resizeAnnotateCanvas());
+    }
+
+    async function saveDocxHtmlEdits() {
+        if (!state.currentSession || !state.referencePdf) return;
+        if (!userCanEditSession()) {
+            showToast('Only editors can save document edits', 'error');
+            return;
+        }
+        const content = document.getElementById('session-docx-content');
+        if (!content) return;
+        if (!docxEdit.dirty) {
+            showToast('No changes to save', 'info');
+            return;
+        }
+        docxEdit.saving = true;
+        updateDocxEditToolbar();
+        try {
+            const data = await api(`/sessions/${state.currentSession}/docx-html`, {
+                method: 'PUT',
+                body: JSON.stringify({ html: content.innerHTML })
+            });
+            state.referencePdf = normalizeReferencePdf(data.referencePdf) || state.referencePdf;
+            if (state.referencePdf) {
+                state.referencePdf.editedHtml = content.innerHTML;
+            }
+            docxEdit.dirty = false;
+            if (state.socket && state.socket.connected) {
+                state.socket.emit('session-pdf-updated', {
+                    sessionId: state.currentSession,
+                    referencePdf: state.referencePdf
+                });
+            }
+            showToast('Document saved', 'success');
+            loadDocAnnotations();
+            resizeAnnotateCanvas();
+        } catch (err) {
+            showToast(err.message || 'Failed to save document', 'error');
+        } finally {
+            docxEdit.saving = false;
+            updateDocxEditToolbar();
+        }
+    }
+
+    function initDocxTextEditing() {
+        if (docxEdit.bound) return;
+        docxEdit.bound = true;
+        const content = document.getElementById('session-docx-content');
+        content?.addEventListener('input', () => {
+            if (!docxEdit.active) return;
+            docxEdit.dirty = true;
+            updateDocxEditToolbar();
+            resizeAnnotateCanvas();
+        });
+        content?.addEventListener('keydown', (e) => {
+            if (!docxEdit.active) return;
+            if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
+                e.preventDefault();
+                e.stopPropagation();
+                saveDocxHtmlEdits();
+            }
+        });
+        document.getElementById('doc-text-edit-toggle')?.addEventListener('click', () => setDocxEditMode());
+        document.getElementById('doc-text-save')?.addEventListener('click', () => saveDocxHtmlEdits());
     }
 
     function renderIframeDocument(src) {
@@ -844,7 +983,11 @@
         docAnnotate.strokes = [];
         docAnnotate.current = null;
         docAnnotate.docKey = null;
+        docxEdit.active = false;
+        docxEdit.dirty = false;
+        docxEdit.saving = false;
         if (docAnnotate.tool) setDocAnnotateTool(null);
+        updateDocxEditToolbar();
         redrawDocAnnotations();
     }
 
@@ -2144,7 +2287,11 @@
             title.textContent = state.referencePdf.originalName || 'Reference document';
         }
         if (hasPdf) {
-            renderSessionPdf(state.referencePdf.url);
+            const kind = getReferenceDocKind(state.referencePdf);
+            const skipReload = docxEdit.dirty && kind === 'docx'
+                && document.getElementById('session-docx-viewer')
+                && !document.getElementById('session-docx-viewer').hidden;
+            if (!skipReload) renderSessionPdf(state.referencePdf.url);
         } else {
             clearSessionPdfView();
         }
@@ -2154,8 +2301,14 @@
         if (showSplit) {
             syncPdfCodeSplitterVisibility();
             initDocAnnotate();
+            initDocxTextEditing();
             layoutMonacoEditors();
-            requestAnimationFrame(() => resizeAnnotateCanvas());
+            requestAnimationFrame(() => {
+                resizeAnnotateCanvas();
+                updateDocxEditToolbar();
+            });
+        } else {
+            updateDocxEditToolbar();
         }
     }
 
@@ -2168,7 +2321,8 @@
                 url: rp.url,
                 originalName: rp.originalName || 'reference.pdf',
                 mimeType: rp.mimeType || null,
-                kind: detectReferenceKindClient(rp.originalName, rp.mimeType, rp.kind)
+                kind: detectReferenceKindClient(rp.originalName, rp.mimeType, rp.kind),
+                editedHtml: typeof rp.editedHtml === 'string' ? rp.editedHtml : null
             };
         }
         if (rp.storageName) {
@@ -2176,7 +2330,8 @@
                 url: `/uploads/${rp.storageName}`,
                 originalName: rp.originalName || 'reference.pdf',
                 mimeType: rp.mimeType || null,
-                kind: detectReferenceKindClient(rp.originalName, rp.mimeType, rp.kind)
+                kind: detectReferenceKindClient(rp.originalName, rp.mimeType, rp.kind),
+                editedHtml: typeof rp.editedHtml === 'string' ? rp.editedHtml : null
             };
         }
         return null;
@@ -3748,6 +3903,10 @@
 
         state.socket.on('reference-pdf-changed', (data) => {
             if (!data) return;
+            if (docxEdit.dirty && docxEdit.active) {
+                // Keep local unsaved edits; only refresh metadata when idle.
+                return;
+            }
             state.referencePdf = data.referencePdf
                 ? normalizeReferencePdf({ referencePdf: data.referencePdf })
                 : null;
@@ -3758,6 +3917,7 @@
             } else {
                 state.pdfSplitVisible = false;
             }
+            docxEdit.dirty = false;
             updateReferencePdfUI();
         });
 
@@ -6308,6 +6468,7 @@
         initDashboard();
         initPaneResizers();
         initDocAnnotate();
+        initDocxTextEditing();
         initEditorToolbar();
         initAdminPanel();
         initPublishViewControls();

@@ -32,7 +32,8 @@ function referencePdfForClient(session) {
         url: `/uploads/${rp.storageName}`,
         originalName,
         mimeType,
-        kind
+        kind,
+        editedHtml: typeof rp.editedHtml === 'string' && rp.editedHtml ? rp.editedHtml : null
     };
 }
 
