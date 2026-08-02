@@ -469,17 +469,18 @@
     function updatePdfZoomLabel() {
         const el = document.getElementById('pdf-zoom-label');
         if (el) el.textContent = sessionPdfZoom === 'fit' ? 'Fit' : `${sessionPdfZoom}%`;
-        const content = document.getElementById('session-docx-content');
-        if (content) {
+        const page = document.getElementById('session-docx-page');
+        if (page) {
             const scale = sessionPdfZoom === 'fit' ? 1 : (sessionPdfZoom / 100);
-            content.style.transform = `scale(${scale})`;
+            page.style.transform = `scale(${scale})`;
         }
     }
 
     function annotateStorageKey() {
         const doc = state.referencePdf;
         if (!state.currentSession || !doc || !doc.url) return null;
-        return `codemesh_doc_ink_${state.currentSession}_${doc.url}`;
+        // v2 = document-anchored coords (scroll with content), not viewport overlay
+        return `codemesh_doc_ink_v2_${state.currentSession}_${doc.url}`;
     }
 
     function loadDocAnnotations() {
@@ -505,14 +506,58 @@
         return document.getElementById('doc-annotate-canvas');
     }
 
+    function isDocxAnnotateMode() {
+        const wrap = document.getElementById('session-docx-viewer');
+        return !!(wrap && !wrap.hidden && state.referencePdf && getReferenceDocKind(state.referencePdf) === 'docx');
+    }
+
+    function placeAnnotateCanvas() {
+        const canvas = getAnnotateCanvas();
+        if (!canvas) return;
+        const page = document.getElementById('session-docx-page');
+        const stack = document.getElementById('pdf-viewer-stack');
+        if (isDocxAnnotateMode() && page) {
+            if (canvas.parentElement !== page) page.appendChild(canvas);
+            canvas.classList.add('doc-annotate-on-page');
+            canvas.classList.remove('doc-annotate-viewport');
+            canvas.hidden = false;
+        } else if (stack) {
+            // PDF/Office iframe: browser handles its own scroll; keep overlay off the iframe
+            // so drawings don't fake-stick to the viewport. Pen works on DOCX.
+            if (canvas.parentElement !== stack) stack.appendChild(canvas);
+            canvas.classList.remove('doc-annotate-on-page');
+            canvas.classList.add('doc-annotate-viewport');
+            canvas.hidden = true;
+        }
+    }
+
     function resizeAnnotateCanvas() {
         const canvas = getAnnotateCanvas();
-        const stack = document.getElementById('pdf-viewer-stack');
-        if (!canvas || !stack) return;
-        const rect = stack.getBoundingClientRect();
+        if (!canvas) return;
+        placeAnnotateCanvas();
+        if (canvas.hidden) {
+            redrawDocAnnotations();
+            return;
+        }
+
         const dpr = window.devicePixelRatio || 1;
-        const w = Math.max(1, Math.floor(rect.width));
-        const h = Math.max(1, Math.floor(rect.height));
+        let w;
+        let h;
+        if (isDocxAnnotateMode()) {
+            const content = document.getElementById('session-docx-content');
+            const page = document.getElementById('session-docx-page');
+            if (!content || !page) return;
+            w = Math.max(1, Math.ceil(content.offsetWidth || page.offsetWidth || 1));
+            h = Math.max(1, Math.ceil(Math.max(content.scrollHeight, content.offsetHeight, page.offsetHeight) || 1));
+            page.style.minHeight = `${h}px`;
+        } else {
+            const stack = document.getElementById('pdf-viewer-stack');
+            if (!stack) return;
+            const rect = stack.getBoundingClientRect();
+            w = Math.max(1, Math.floor(rect.width));
+            h = Math.max(1, Math.floor(rect.height));
+        }
+
         canvas.width = Math.floor(w * dpr);
         canvas.height = Math.floor(h * dpr);
         canvas.style.width = `${w}px`;
@@ -524,11 +569,11 @@
 
     function redrawDocAnnotations() {
         const canvas = getAnnotateCanvas();
-        if (!canvas) return;
+        if (!canvas || canvas.hidden) return;
         const ctx = canvas.getContext('2d');
         const dpr = window.devicePixelRatio || 1;
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.clearRect(0, 0, canvas.width / dpr, canvas.height / dpr);
         for (const stroke of docAnnotate.strokes) {
             drawStroke(ctx, stroke);
         }
@@ -564,19 +609,31 @@
 
     function canvasPointFromEvent(e) {
         const canvas = getAnnotateCanvas();
-        if (!canvas) return null;
+        if (!canvas || canvas.hidden) return null;
         const rect = canvas.getBoundingClientRect();
+        if (rect.width <= 0 || rect.height <= 0) return null;
+        const dpr = window.devicePixelRatio || 1;
+        const logicalW = canvas.width / dpr;
+        const logicalH = canvas.height / dpr;
         return {
-            x: e.clientX - rect.left,
-            y: e.clientY - rect.top
+            x: ((e.clientX - rect.left) / rect.width) * logicalW,
+            y: ((e.clientY - rect.top) / rect.height) * logicalH
         };
     }
 
     function setDocAnnotateTool(tool) {
         const stack = document.getElementById('pdf-viewer-stack');
+        const wrap = document.getElementById('session-docx-viewer');
         const hint = document.getElementById('doc-annotate-hint');
         const penBtn = document.getElementById('doc-pen-toggle');
         const eraserBtn = document.getElementById('doc-eraser-toggle');
+
+        placeAnnotateCanvas();
+        if (!isDocxAnnotateMode() && tool) {
+            showToast('Pen sticks to the page on DOCX. For PDF, use the browser’s built-in pen (open in new tab if needed).', 'info');
+            tool = null;
+        }
+
         if (tool == null) {
             docAnnotate.tool = null;
         } else if (docAnnotate.tool === tool) {
@@ -586,12 +643,14 @@
         }
         stack?.classList.toggle('doc-pen-active', docAnnotate.tool === 'pen');
         stack?.classList.toggle('doc-eraser-active', docAnnotate.tool === 'eraser');
+        wrap?.classList.toggle('doc-pen-active', docAnnotate.tool === 'pen');
+        wrap?.classList.toggle('doc-eraser-active', docAnnotate.tool === 'eraser');
         penBtn?.classList.toggle('active', docAnnotate.tool === 'pen');
         eraserBtn?.classList.toggle('active', docAnnotate.tool === 'eraser');
         if (hint) {
             if (docAnnotate.tool === 'pen') {
                 hint.hidden = false;
-                hint.textContent = 'Pen on — draw on the document. Click pen again to stop.';
+                hint.textContent = 'Pen on — marks stay on the page when you scroll. Click pen again to stop.';
             } else if (docAnnotate.tool === 'eraser') {
                 hint.hidden = false;
                 hint.textContent = 'Eraser on — scrub to erase. Click eraser again to stop.';
@@ -710,6 +769,16 @@
             const result = await window.mammoth.convertToHtml({ arrayBuffer: buffer });
             content.innerHTML = result.value || '<p>(Empty document)</p>';
             updatePdfZoomLabel();
+            placeAnnotateCanvas();
+            requestAnimationFrame(() => {
+                resizeAnnotateCanvas();
+                // Images can change page height after load
+                content.querySelectorAll('img').forEach((img) => {
+                    if (!img.complete) {
+                        img.addEventListener('load', () => resizeAnnotateCanvas(), { once: true });
+                    }
+                });
+            });
         } catch (err) {
             content.innerHTML = `<p>Failed to render DOCX: ${escapeHtml(err.message || 'unknown error')}</p>`;
         }

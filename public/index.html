@@ -799,9 +799,11 @@
             <div class="pdf-viewer-stack" id="pdf-viewer-stack">
               <iframe id="session-pdf-viewer" class="session-pdf-viewer" title="Reference document"></iframe>
               <div id="session-docx-viewer" class="session-docx-viewer" hidden>
-                <div id="session-docx-content" class="session-docx-content"></div>
+                <div id="session-docx-page" class="session-docx-page">
+                  <div id="session-docx-content" class="session-docx-content"></div>
+                  <canvas id="doc-annotate-canvas" class="doc-annotate-canvas doc-annotate-on-page" aria-label="Document pen layer"></canvas>
+                </div>
               </div>
-              <canvas id="doc-annotate-canvas" class="doc-annotate-canvas" aria-label="Document pen layer"></canvas>
               <div id="doc-annotate-hint" class="doc-annotate-hint" hidden>Pen on — draw on the document. Click pen again to stop.</div>
             </div>
             <div id="pdf-code-splitter" class="pane-splitter pane-splitter-vertical pane-splitter-overlay" role="separator"
