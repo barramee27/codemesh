@@ -16,7 +16,12 @@ const sessionRoutes = require('./routes/sessions');
 const runRoutes = require('./routes/run');
 const terminalRoutes = require('./routes/terminal');
 const adminRoutes = require('./routes/admin');
-const uploadRoutes = require('./routes/upload');
+let uploadRoutes = null;
+try {
+    uploadRoutes = require('./routes/upload');
+} catch (err) {
+    console.warn('⚠ Upload/GCS routes disabled:', err.message);
+}
 const clashroomsRoutes = require('./routes/clashrooms');
 const setupCollaboration = require('./sockets/collaboration');
 
@@ -69,19 +74,21 @@ app.get('/js/app.js', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'js', 'app.js'));
 });
 
-// GCS upload portal (standalone UI)
-app.get('/upload', (req, res) => {
-    res.set('Cache-Control', 'no-cache, no-store, must-revalidate');
-    res.set('Content-Type', 'text/html; charset=utf-8');
-    res.sendFile(path.join(__dirname, 'public', 'upload', 'index.html'));
-});
-app.use('/upload', express.static(path.join(__dirname, 'public', 'upload'), {
-    maxAge: process.env.NODE_ENV === 'production' ? '1h' : 0,
-    setHeaders(res, filePath) {
-        if (/\.css$/i.test(filePath)) res.setHeader('Content-Type', 'text/css; charset=utf-8');
-        if (/\.js$/i.test(filePath)) res.setHeader('Content-Type', 'application/javascript; charset=utf-8');
-    }
-}));
+// GCS upload portal (standalone UI) — only if upload routes loaded
+if (uploadRoutes) {
+    app.get('/upload', (req, res) => {
+        res.set('Cache-Control', 'no-cache, no-store, must-revalidate');
+        res.set('Content-Type', 'text/html; charset=utf-8');
+        res.sendFile(path.join(__dirname, 'public', 'upload', 'index.html'));
+    });
+    app.use('/upload', express.static(path.join(__dirname, 'public', 'upload'), {
+        maxAge: process.env.NODE_ENV === 'production' ? '1h' : 0,
+        setHeaders(res, filePath) {
+            if (/\.css$/i.test(filePath)) res.setHeader('Content-Type', 'text/css; charset=utf-8');
+            if (/\.js$/i.test(filePath)) res.setHeader('Content-Type', 'application/javascript; charset=utf-8');
+        }
+    }));
+}
 
 // Static files with cache headers (1 day for assets)
 app.use(express.static(path.join(__dirname, 'public'), {
@@ -131,7 +138,7 @@ app.use('/api/sessions', sessionRoutes);
 app.use('/api/run', runRoutes);
 app.use('/api/terminal', terminalRoutes);
 app.use('/api/admin', adminRoutes);
-app.use('/api/upload', uploadRoutes);
+if (uploadRoutes) app.use('/api/upload', uploadRoutes);
 app.use('/api/clashrooms', clashroomsRoutes);
 
 // SPA fallback (no-cache so deploys are visible immediately)

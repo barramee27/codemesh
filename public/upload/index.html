@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CodeMesh Upload — GCS</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/upload/upload.css" />
+</head>
+<body>
+  <div class="bg-grid" aria-hidden="true"></div>
+  <div class="page">
+    <header class="header">
+      <a href="/" class="brand">
+        <span class="brand-mark">&lt;/&gt;</span>
+        <span class="brand-text">CodeMesh <em>Upload</em></span>
+      </a>
+      <div id="header-user" class="header-user hidden"></div>
+    </header>
+
+  <main class="main">
+    <section id="auth-panel" class="card auth-card">
+      <h1>Sign in to upload</h1>
+      <p class="muted">Admin accounts and authorized users only. Files go to Google Cloud Storage.</p>
+      <form id="login-form" class="login-form">
+        <label>
+          <span>Email</span>
+          <input type="email" id="login-email" autocomplete="email" required placeholder="you@example.com" />
+        </label>
+        <label>
+          <span>Password</span>
+          <input type="password" id="login-password" autocomplete="current-password" required placeholder="••••••••" />
+        </label>
+        <button type="submit" class="btn btn-primary" id="login-btn">Sign in</button>
+        <p id="login-error" class="error-text hidden"></p>
+      </form>
+    </section>
+
+    <section id="denied-panel" class="card hidden">
+      <h2>Access denied</h2>
+      <p class="muted">Your account cannot use this upload portal. Contact an admin if you need access.</p>
+      <button type="button" class="btn btn-secondary" id="logout-denied-btn">Sign out</button>
+    </section>
+
+    <section id="upload-panel" class="hidden">
+      <div class="hero">
+        <h1>Upload anything</h1>
+        <p class="muted">Any file type · up to <strong id="max-mb-label">150</strong> MB per file · public GCS URLs</p>
+      </div>
+
+      <div class="card drop-card" id="drop-zone">
+        <input type="file" id="file-input" multiple hidden />
+        <div class="drop-inner">
+          <div class="drop-icon" aria-hidden="true">↑</div>
+          <p class="drop-title">Drag files here or click to browse</p>
+          <p class="muted small">Videos, archives, docs, images — all formats accepted</p>
+          <button type="button" class="btn btn-primary" id="pick-files-btn">Choose files</button>
+        </div>
+      </div>
+
+      <div id="upload-queue" class="queue hidden"></div>
+
+      <div class="card files-card">
+        <div class="files-header">
+          <h2>Your uploads</h2>
+          <button type="button" class="btn btn-ghost btn-sm" id="refresh-files-btn">Refresh</button>
+        </div>
+        <div id="files-loading" class="muted small">Loading…</div>
+        <div id="files-empty" class="muted small hidden">No files yet. Upload something above.</div>
+        <ul id="files-list" class="files-list"></ul>
+      </div>
+
+      <div class="footer-actions">
+        <button type="button" class="btn btn-secondary" id="logout-btn">Sign out</button>
+        <a href="/" class="btn btn-ghost">Back to CodeMesh</a>
+      </div>
+    </section>
+  </main>
+  </div>
+
+  <template id="file-row-template">
+    <li class="file-row">
+      <div class="file-meta">
+        <span class="file-name"></span>
+        <span class="file-sub muted small"></span>
+      </div>
+      <div class="file-actions">
+        <button type="button" class="btn btn-ghost btn-sm copy-url-btn">Copy URL</button>
+        <a class="btn btn-ghost btn-sm open-url-btn" target="_blank" rel="noopener">Open</a>
+        <button type="button" class="btn btn-danger btn-sm delete-file-btn">Delete</button>
+      </div>
+    </li>
+  </template>
+
+  <script src="/upload/upload.js" defer></script>
+</body>
+</html>
