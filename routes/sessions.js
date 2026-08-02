@@ -24,25 +24,39 @@ const {
     isValidSessionId,
     normalizeUtf8Text
 } = require('../utils/utf8');
-const { referencePdfForClient } = require('../utils/sessionPdf');
+const {
+    referencePdfForClient,
+    detectReferenceKind,
+    extensionForKind
+} = require('../utils/sessionPdf');
 
 const UPLOADS_DIR = path.join(__dirname, '..', 'uploads');
 if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+
+const REF_DOC_MIMES = new Set([
+    'application/pdf',
+    'application/msword',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    'application/octet-stream'
+]);
 
 const pdfUpload = multer({
     storage: multer.diskStorage({
         destination: (req, file, cb) => cb(null, UPLOADS_DIR),
         filename: (req, file, cb) => {
             const sid = path.basename(req.params.id || 'session');
-            cb(null, `session-${sid}-ref-${Date.now()}.pdf`);
+            const kind = detectReferenceKind(file.originalname, file.mimetype);
+            cb(null, `session-${sid}-ref-${Date.now()}${extensionForKind(kind)}`);
         }
     }),
     limits: { fileSize: 20 * 1024 * 1024 },
     fileFilter: (req, file, cb) => {
-        if (file.mimetype === 'application/pdf' || /\.pdf$/i.test(file.originalname)) {
+        const nameOk = /\.(pdf|docx?)$/i.test(file.originalname || '');
+        const mimeOk = REF_DOC_MIMES.has(file.mimetype);
+        if (nameOk || mimeOk) {
             cb(null, true);
         } else {
-            cb(new Error('Only PDF files are allowed'));
+            cb(new Error('Only PDF, DOC, or DOCX files are allowed'));
         }
     }
 });
@@ -579,10 +593,10 @@ router.put('/:id/code-visibility', authMiddleware, async (req, res) => {
     }
 });
 
-// POST /api/sessions/:id/pdf — attach reference PDF for split view
+// POST /api/sessions/:id/pdf — attach reference PDF/DOC/DOCX for split view
 router.post('/:id/pdf', authMiddleware, pdfUpload.single('pdf'), async (req, res) => {
     try {
-        if (!req.file) return res.status(400).json({ error: 'No PDF uploaded' });
+        if (!req.file) return res.status(400).json({ error: 'No document uploaded' });
         const session = await Session.findOne({ sessionId: req.params.id });
         if (!session) {
             fs.unlink(req.file.path, () => {});
@@ -590,15 +604,17 @@ router.post('/:id/pdf', authMiddleware, pdfUpload.single('pdf'), async (req, res
         }
         if (!sessionIsOwnerOrSiteAdmin(session, req.user.id, req.user.role === 'admin')) {
             fs.unlink(req.file.path, () => {});
-            return res.status(403).json({ error: 'Only the session owner or site admin can attach a PDF' });
+            return res.status(403).json({ error: 'Only the session owner or site admin can attach a document' });
         }
         if (session.referencePdf && session.referencePdf.storageName) {
             const oldPath = path.join(UPLOADS_DIR, session.referencePdf.storageName);
             if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
         }
+        const originalName = decodeMultipartFilename(req.file.originalname) || 'reference.pdf';
         session.referencePdf = {
             storageName: req.file.filename,
-            originalName: decodeMultipartFilename(req.file.originalname) || 'reference.pdf',
+            originalName,
+            mimeType: req.file.mimetype || null,
             uploadedAt: new Date()
         };
         session.updatedAt = Date.now();
@@ -606,12 +622,12 @@ router.post('/:id/pdf', authMiddleware, pdfUpload.single('pdf'), async (req, res
         const referencePdf = referencePdfPayload(session);
         broadcastReferencePdf(req, session.sessionId, referencePdf);
         res.json({
-            message: 'PDF attached for split view',
+            message: 'Document attached for split view',
             referencePdf
         });
     } catch (err) {
-        console.error('session pdf upload:', err);
-        res.status(500).json({ error: err.message || 'Failed to upload PDF' });
+        console.error('session document upload:', err);
+        res.status(500).json({ error: err.message || 'Failed to upload document' });
     }
 });
 
@@ -621,7 +637,7 @@ router.delete('/:id/pdf', authMiddleware, async (req, res) => {
         const session = await Session.findOne({ sessionId: req.params.id });
         if (!session) return res.status(404).json({ error: 'Session not found' });
         if (!sessionIsOwnerOrSiteAdmin(session, req.user.id, req.user.role === 'admin')) {
-            return res.status(403).json({ error: 'Only the session owner or site admin can remove the PDF' });
+            return res.status(403).json({ error: 'Only the session owner or site admin can remove the document' });
         }
         if (session.referencePdf && session.referencePdf.storageName) {
             const p = path.join(UPLOADS_DIR, session.referencePdf.storageName);
@@ -631,10 +647,10 @@ router.delete('/:id/pdf', authMiddleware, async (req, res) => {
         session.updatedAt = Date.now();
         await session.save();
         broadcastReferencePdf(req, session.sessionId, null);
-        res.json({ message: 'PDF removed', referencePdf: null });
+        res.json({ message: 'Document removed', referencePdf: null });
     } catch (err) {
-        console.error('session pdf delete:', err);
-        res.status(500).json({ error: 'Failed to remove PDF' });
+        console.error('session document delete:', err);
+        res.status(500).json({ error: 'Failed to remove document' });
     }
 });
 

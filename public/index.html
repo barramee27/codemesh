@@ -555,11 +555,11 @@
               <div class="menubar-dropdown-item" data-action="import-folder">Import folder…</div>
               <div class="menubar-dropdown-item" data-action="import-github">Import from GitHub…</div>
               <div class="menubar-dropdown-divider"></div>
-              <div class="menubar-dropdown-item" data-action="attach-pdf">Attach reference PDF…</div>
-              <div class="menubar-dropdown-item" data-action="remove-pdf">Remove reference PDF</div>
+              <div class="menubar-dropdown-item" data-action="attach-pdf">Attach reference document…</div>
+              <div class="menubar-dropdown-item" data-action="remove-pdf">Remove reference document</div>
               <input type="file" id="import-folder-input" webkitdirectory directory multiple style="display:none" aria-hidden="true" />
               <input type="file" id="import-files-input" multiple style="display:none" aria-hidden="true" />
-              <input type="file" id="session-pdf-input" accept="application/pdf,.pdf" style="display:none" aria-hidden="true" />
+              <input type="file" id="session-pdf-input" accept="application/pdf,.pdf,application/msword,.doc,application/vnd.openxmlformats-officedocument.wordprocessingml.document,.docx" style="display:none" aria-hidden="true" />
               <div class="menubar-dropdown-divider"></div>
               <div class="menubar-dropdown-item" data-action="save">Save</div>
             </div>
@@ -581,7 +581,7 @@
             <div class="menubar-dropdown">
               <div class="menubar-dropdown-item" data-action="toggle-sidebar">Toggle Sidebar</div>
               <div class="menubar-dropdown-item" data-action="toggle-panel">Toggle Panel</div>
-              <div class="menubar-dropdown-item" data-action="toggle-pdf-split">PDF + code split view</div>
+              <div class="menubar-dropdown-item" data-action="toggle-pdf-split">Document + code split view</div>
             </div>
           </div>
           <div class="menubar-item" data-menu="go">Go
@@ -759,11 +759,11 @@
         <div id="editor-layout-split" class="editor-layout-split">
           <aside id="pdf-split-pane" class="pdf-split-pane">
             <div class="pdf-split-header">
-              <span id="pdf-split-title">Reference PDF</span>
-              <button type="button" class="btn btn-icon btn-xs" id="pdf-split-close" title="Hide PDF pane"><i class="codicon codicon-close"></i></button>
+              <span id="pdf-split-title">Reference document</span>
+              <button type="button" class="btn btn-icon btn-xs" id="pdf-split-close" title="Hide document pane"><i class="codicon codicon-close"></i></button>
             </div>
             <div class="pdf-split-toolbar" id="pdf-split-toolbar">
-              <button type="button" class="btn btn-icon btn-xs" id="pdf-open-new-tab" title="Open in new tab (zoom, pen, print)">
+              <button type="button" class="btn btn-icon btn-xs" id="pdf-open-new-tab" title="Open in new tab">
                 <i class="codicon codicon-link-external"></i>
               </button>
               <button type="button" class="btn btn-icon btn-xs" id="pdf-zoom-out" title="Zoom out">
@@ -776,8 +776,34 @@
               <button type="button" class="btn btn-icon btn-xs" id="pdf-zoom-fit" title="Fit width">
                 <i class="codicon codicon-screen-full"></i>
               </button>
+              <span class="pdf-toolbar-spacer"></span>
+              <button type="button" class="btn btn-icon btn-xs doc-pen-tool" id="doc-pen-toggle" data-tool="pen" title="Pen — draw on document">
+                <i class="codicon codicon-edit"></i>
+              </button>
+              <button type="button" class="btn btn-icon btn-xs doc-pen-tool" id="doc-eraser-toggle" data-tool="eraser" title="Eraser">
+                <i class="codicon codicon-trash"></i>
+              </button>
+              <button type="button" class="btn btn-icon btn-xs" id="doc-pen-undo" title="Undo stroke">
+                <i class="codicon codicon-discard"></i>
+              </button>
+              <button type="button" class="btn btn-icon btn-xs" id="doc-pen-clear" title="Clear all drawings">
+                <i class="codicon codicon-clear-all"></i>
+              </button>
+              <span class="doc-pen-colors" id="doc-pen-colors" title="Ink color">
+                <button type="button" class="doc-pen-swatch active" data-color="#111111" style="background:#111" aria-label="Black"></button>
+                <button type="button" class="doc-pen-swatch" data-color="#e11d48" style="background:#e11d48" aria-label="Red"></button>
+                <button type="button" class="doc-pen-swatch" data-color="#2563eb" style="background:#2563eb" aria-label="Blue"></button>
+                <button type="button" class="doc-pen-swatch" data-color="#16a34a" style="background:#16a34a" aria-label="Green"></button>
+              </span>
             </div>
-            <iframe id="session-pdf-viewer" class="session-pdf-viewer" title="Reference PDF"></iframe>
+            <div class="pdf-viewer-stack" id="pdf-viewer-stack">
+              <iframe id="session-pdf-viewer" class="session-pdf-viewer" title="Reference document"></iframe>
+              <div id="session-docx-viewer" class="session-docx-viewer" hidden>
+                <div id="session-docx-content" class="session-docx-content"></div>
+              </div>
+              <canvas id="doc-annotate-canvas" class="doc-annotate-canvas" aria-label="Document pen layer"></canvas>
+              <div id="doc-annotate-hint" class="doc-annotate-hint" hidden>Pen on — draw on the document. Click pen again to stop.</div>
+            </div>
             <div id="pdf-code-splitter" class="pane-splitter pane-splitter-vertical pane-splitter-overlay" role="separator"
               aria-orientation="vertical" aria-label="Resize PDF and code panes" tabindex="0"></div>
           </aside>
@@ -1164,6 +1190,7 @@
   <div id="toast-container" class="toast-container"></div>
 
   <!-- Scripts -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.8.0/mammoth.browser.min.js"></script>
   <script src="/js/app.js"></script>
 </body>
 

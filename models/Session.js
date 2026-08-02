@@ -92,10 +92,11 @@ const sessionSchema = new mongoose.Schema({
         type: Date,
         default: null
     },
-    /** Optional reference PDF for split view (owner or site admin). */
+    /** Optional reference document (PDF/DOC/DOCX) for split view (owner or site admin). */
     referencePdf: {
         storageName: { type: String },
         originalName: { type: String },
+        mimeType: { type: String },
         uploadedAt: { type: Date }
     },
     createdAt: {

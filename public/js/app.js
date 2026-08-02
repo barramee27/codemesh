@@ -418,12 +418,36 @@
         return '/' + encodeURIComponent(sessionId);
     }
 
-    /** Browser PDF viewer zoom (iframe hash); restored for native zoom/pen toolbar. */
+    /** Browser PDF viewer zoom (iframe hash); also scales DOCX HTML. */
     let sessionPdfZoom = 100;
+
+    const docAnnotate = {
+        tool: null, // null | 'pen' | 'eraser'
+        color: '#111111',
+        width: 2.5,
+        strokes: [],
+        current: null,
+        docKey: null
+    };
 
     function sessionPdfAbsoluteUrl(url) {
         if (!url) return '';
         return url.startsWith('http') ? url : (window.location.origin + url);
+    }
+
+    function detectReferenceKindClient(originalName, mimeType, kind) {
+        if (kind === 'pdf' || kind === 'doc' || kind === 'docx') return kind;
+        const name = String(originalName || '').toLowerCase();
+        const mime = String(mimeType || '').toLowerCase();
+        if (mime.includes('pdf') || name.endsWith('.pdf')) return 'pdf';
+        if (mime.includes('wordprocessingml') || name.endsWith('.docx')) return 'docx';
+        if (mime.includes('msword') || name.endsWith('.doc')) return 'doc';
+        return 'pdf';
+    }
+
+    function getReferenceDocKind(doc) {
+        if (!doc) return 'pdf';
+        return detectReferenceKindClient(doc.originalName, doc.mimeType, doc.kind);
     }
 
     function buildSessionPdfIframeSrc(url) {
@@ -436,24 +460,323 @@
         return `${base}#toolbar=1&navpanes=0&zoom=${sessionPdfZoom}`;
     }
 
+    function buildOfficeOnlineEmbedSrc(url) {
+        const abs = sessionPdfAbsoluteUrl(url);
+        if (!abs || !/^https:\/\//i.test(abs)) return '';
+        return `https://view.officeapps.live.com/op/embed.aspx?src=${encodeURIComponent(abs)}`;
+    }
+
     function updatePdfZoomLabel() {
         const el = document.getElementById('pdf-zoom-label');
         if (el) el.textContent = sessionPdfZoom === 'fit' ? 'Fit' : `${sessionPdfZoom}%`;
+        const content = document.getElementById('session-docx-content');
+        if (content) {
+            const scale = sessionPdfZoom === 'fit' ? 1 : (sessionPdfZoom / 100);
+            content.style.transform = `scale(${scale})`;
+        }
+    }
+
+    function annotateStorageKey() {
+        const doc = state.referencePdf;
+        if (!state.currentSession || !doc || !doc.url) return null;
+        return `codemesh_doc_ink_${state.currentSession}_${doc.url}`;
+    }
+
+    function loadDocAnnotations() {
+        docAnnotate.strokes = [];
+        docAnnotate.docKey = annotateStorageKey();
+        if (!docAnnotate.docKey) return;
+        try {
+            const raw = sessionStorage.getItem(docAnnotate.docKey);
+            if (!raw) return;
+            const parsed = JSON.parse(raw);
+            if (Array.isArray(parsed)) docAnnotate.strokes = parsed;
+        } catch (_) { /* ignore */ }
+    }
+
+    function persistDocAnnotations() {
+        if (!docAnnotate.docKey) return;
+        try {
+            sessionStorage.setItem(docAnnotate.docKey, JSON.stringify(docAnnotate.strokes));
+        } catch (_) { /* quota */ }
+    }
+
+    function getAnnotateCanvas() {
+        return document.getElementById('doc-annotate-canvas');
+    }
+
+    function resizeAnnotateCanvas() {
+        const canvas = getAnnotateCanvas();
+        const stack = document.getElementById('pdf-viewer-stack');
+        if (!canvas || !stack) return;
+        const rect = stack.getBoundingClientRect();
+        const dpr = window.devicePixelRatio || 1;
+        const w = Math.max(1, Math.floor(rect.width));
+        const h = Math.max(1, Math.floor(rect.height));
+        canvas.width = Math.floor(w * dpr);
+        canvas.height = Math.floor(h * dpr);
+        canvas.style.width = `${w}px`;
+        canvas.style.height = `${h}px`;
+        const ctx = canvas.getContext('2d');
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        redrawDocAnnotations();
+    }
+
+    function redrawDocAnnotations() {
+        const canvas = getAnnotateCanvas();
+        if (!canvas) return;
+        const ctx = canvas.getContext('2d');
+        const dpr = window.devicePixelRatio || 1;
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        for (const stroke of docAnnotate.strokes) {
+            drawStroke(ctx, stroke);
+        }
+        if (docAnnotate.current) drawStroke(ctx, docAnnotate.current);
+    }
+
+    function drawStroke(ctx, stroke) {
+        if (!stroke || !stroke.points || stroke.points.length < 1) return;
+        ctx.save();
+        if (stroke.tool === 'eraser') {
+            ctx.globalCompositeOperation = 'destination-out';
+            ctx.strokeStyle = 'rgba(0,0,0,1)';
+            ctx.lineWidth = stroke.width || 18;
+        } else {
+            ctx.globalCompositeOperation = 'source-over';
+            ctx.strokeStyle = stroke.color || '#111';
+            ctx.lineWidth = stroke.width || 2.5;
+        }
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        ctx.beginPath();
+        const pts = stroke.points;
+        ctx.moveTo(pts[0].x, pts[0].y);
+        for (let i = 1; i < pts.length; i++) {
+            ctx.lineTo(pts[i].x, pts[i].y);
+        }
+        if (pts.length === 1) {
+            ctx.lineTo(pts[0].x + 0.01, pts[0].y);
+        }
+        ctx.stroke();
+        ctx.restore();
+    }
+
+    function canvasPointFromEvent(e) {
+        const canvas = getAnnotateCanvas();
+        if (!canvas) return null;
+        const rect = canvas.getBoundingClientRect();
+        return {
+            x: e.clientX - rect.left,
+            y: e.clientY - rect.top
+        };
+    }
+
+    function setDocAnnotateTool(tool) {
+        const stack = document.getElementById('pdf-viewer-stack');
+        const hint = document.getElementById('doc-annotate-hint');
+        const penBtn = document.getElementById('doc-pen-toggle');
+        const eraserBtn = document.getElementById('doc-eraser-toggle');
+        if (tool == null) {
+            docAnnotate.tool = null;
+        } else if (docAnnotate.tool === tool) {
+            docAnnotate.tool = null;
+        } else {
+            docAnnotate.tool = tool;
+        }
+        stack?.classList.toggle('doc-pen-active', docAnnotate.tool === 'pen');
+        stack?.classList.toggle('doc-eraser-active', docAnnotate.tool === 'eraser');
+        penBtn?.classList.toggle('active', docAnnotate.tool === 'pen');
+        eraserBtn?.classList.toggle('active', docAnnotate.tool === 'eraser');
+        if (hint) {
+            if (docAnnotate.tool === 'pen') {
+                hint.hidden = false;
+                hint.textContent = 'Pen on — draw on the document. Click pen again to stop.';
+            } else if (docAnnotate.tool === 'eraser') {
+                hint.hidden = false;
+                hint.textContent = 'Eraser on — scrub to erase. Click eraser again to stop.';
+            } else {
+                hint.hidden = true;
+            }
+        }
+        resizeAnnotateCanvas();
+    }
+
+    function initDocAnnotate() {
+        const canvas = getAnnotateCanvas();
+        if (!canvas || canvas.dataset.bound === '1') return;
+        canvas.dataset.bound = '1';
+
+        const onDown = (e) => {
+            if (!docAnnotate.tool) return;
+            e.preventDefault();
+            const pt = canvasPointFromEvent(e);
+            if (!pt) return;
+            try { canvas.setPointerCapture(e.pointerId); } catch (_) { /* ignore */ }
+            docAnnotate.current = {
+                tool: docAnnotate.tool,
+                color: docAnnotate.color,
+                width: docAnnotate.tool === 'eraser' ? 18 : docAnnotate.width,
+                points: [pt]
+            };
+            redrawDocAnnotations();
+        };
+        const onMove = (e) => {
+            if (!docAnnotate.current) return;
+            e.preventDefault();
+            const pt = canvasPointFromEvent(e);
+            if (!pt) return;
+            docAnnotate.current.points.push(pt);
+            redrawDocAnnotations();
+        };
+        const onUp = (e) => {
+            if (!docAnnotate.current) return;
+            try { canvas.releasePointerCapture(e.pointerId); } catch (_) { /* ignore */ }
+            if (docAnnotate.current.points.length) {
+                docAnnotate.strokes.push(docAnnotate.current);
+                persistDocAnnotations();
+            }
+            docAnnotate.current = null;
+            redrawDocAnnotations();
+        };
+
+        canvas.addEventListener('pointerdown', onDown);
+        canvas.addEventListener('pointermove', onMove);
+        canvas.addEventListener('pointerup', onUp);
+        canvas.addEventListener('pointercancel', onUp);
+
+        document.getElementById('doc-pen-toggle')?.addEventListener('click', () => setDocAnnotateTool('pen'));
+        document.getElementById('doc-eraser-toggle')?.addEventListener('click', () => setDocAnnotateTool('eraser'));
+        document.getElementById('doc-pen-undo')?.addEventListener('click', () => {
+            docAnnotate.strokes.pop();
+            persistDocAnnotations();
+            redrawDocAnnotations();
+        });
+        document.getElementById('doc-pen-clear')?.addEventListener('click', () => {
+            if (!docAnnotate.strokes.length) return;
+            if (!confirm('Clear all pen drawings on this document?')) return;
+            docAnnotate.strokes = [];
+            persistDocAnnotations();
+            redrawDocAnnotations();
+        });
+        document.getElementById('doc-pen-colors')?.addEventListener('click', (e) => {
+            const btn = e.target.closest('.doc-pen-swatch');
+            if (!btn) return;
+            docAnnotate.color = btn.dataset.color || '#111111';
+            document.querySelectorAll('.doc-pen-swatch').forEach((el) => {
+                el.classList.toggle('active', el === btn);
+            });
+            if (!docAnnotate.tool) setDocAnnotateTool('pen');
+        });
+
+        window.addEventListener('resize', () => {
+            if (document.getElementById('editor-layout-split')?.classList.contains('pdf-split-active')) {
+                resizeAnnotateCanvas();
+            }
+        });
+    }
+
+    async function loadMammothIfNeeded() {
+        if (window.mammoth) return true;
+        return new Promise((resolve) => {
+            const s = document.createElement('script');
+            s.src = 'https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.8.0/mammoth.browser.min.js';
+            s.onload = () => resolve(!!window.mammoth);
+            s.onerror = () => resolve(false);
+            document.head.appendChild(s);
+        });
+    }
+
+    async function renderDocxInPane(url) {
+        const wrap = document.getElementById('session-docx-viewer');
+        const content = document.getElementById('session-docx-content');
+        const iframe = document.getElementById('session-pdf-viewer');
+        if (!wrap || !content) return;
+        if (iframe) {
+            iframe.style.display = 'none';
+            iframe.removeAttribute('src');
+        }
+        wrap.hidden = false;
+        content.innerHTML = '<p style="opacity:0.7">Loading Word document…</p>';
+        const ok = await loadMammothIfNeeded();
+        if (!ok) {
+            content.innerHTML = '<p>Could not load DOCX viewer. Open in a new tab instead.</p>';
+            return;
+        }
+        try {
+            const res = await fetch(url);
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const buffer = await res.arrayBuffer();
+            const result = await window.mammoth.convertToHtml({ arrayBuffer: buffer });
+            content.innerHTML = result.value || '<p>(Empty document)</p>';
+            updatePdfZoomLabel();
+        } catch (err) {
+            content.innerHTML = `<p>Failed to render DOCX: ${escapeHtml(err.message || 'unknown error')}</p>`;
+        }
+    }
+
+    function renderIframeDocument(src) {
+        const iframe = document.getElementById('session-pdf-viewer');
+        const wrap = document.getElementById('session-docx-viewer');
+        if (wrap) {
+            wrap.hidden = true;
+            const content = document.getElementById('session-docx-content');
+            if (content) content.innerHTML = '';
+        }
+        if (!iframe || !src) return;
+        iframe.style.display = 'block';
+        iframe.src = src;
     }
 
     function renderSessionPdf(url) {
-        const iframe = document.getElementById('session-pdf-viewer');
-        if (!iframe || !url) return;
-        iframe.style.display = 'block';
-        iframe.src = buildSessionPdfIframeSrc(url);
+        const doc = state.referencePdf || { url };
+        const kind = getReferenceDocKind(doc);
         updatePdfZoomLabel();
+        loadDocAnnotations();
+
+        if (kind === 'docx') {
+            renderDocxInPane(url).then(() => resizeAnnotateCanvas());
+            return;
+        }
+        if (kind === 'doc') {
+            const officeSrc = buildOfficeOnlineEmbedSrc(url);
+            if (officeSrc) {
+                renderIframeDocument(officeSrc);
+            } else {
+                const wrap = document.getElementById('session-docx-viewer');
+                const content = document.getElementById('session-docx-content');
+                const iframe = document.getElementById('session-pdf-viewer');
+                if (iframe) {
+                    iframe.style.display = 'none';
+                    iframe.removeAttribute('src');
+                }
+                if (wrap && content) {
+                    wrap.hidden = false;
+                    content.innerHTML = '<p>Legacy .doc preview needs HTTPS (or convert to .docx / PDF). Use “Open in new tab” to download.</p>';
+                }
+            }
+            requestAnimationFrame(() => resizeAnnotateCanvas());
+            return;
+        }
+        renderIframeDocument(buildSessionPdfIframeSrc(url));
+        requestAnimationFrame(() => resizeAnnotateCanvas());
     }
 
     function clearSessionPdfView() {
         const iframe = document.getElementById('session-pdf-viewer');
         if (iframe) {
             iframe.removeAttribute('src');
+            iframe.style.display = 'block';
         }
+        const wrap = document.getElementById('session-docx-viewer');
+        const content = document.getElementById('session-docx-content');
+        if (wrap) wrap.hidden = true;
+        if (content) content.innerHTML = '';
+        docAnnotate.strokes = [];
+        docAnnotate.current = null;
+        docAnnotate.docKey = null;
+        if (docAnnotate.tool) setDocAnnotateTool(null);
+        redrawDocAnnotations();
     }
 
     function openSessionPdfInNewTab() {
@@ -470,7 +793,12 @@
         }
         updatePdfZoomLabel();
         if (state.referencePdf && state.referencePdf.url) {
-            renderSessionPdf(state.referencePdf.url);
+            const kind = getReferenceDocKind(state.referencePdf);
+            if (kind === 'pdf') {
+                renderSessionPdf(state.referencePdf.url);
+            } else {
+                resizeAnnotateCanvas();
+            }
         }
     }
 
@@ -1744,7 +2072,7 @@
         if (!pane || !layout) return;
         const hasPdf = !!(state.referencePdf && state.referencePdf.url);
         if (hasPdf && title) {
-            title.textContent = state.referencePdf.originalName || 'Reference PDF';
+            title.textContent = state.referencePdf.originalName || 'Reference document';
         }
         if (hasPdf) {
             renderSessionPdf(state.referencePdf.url);
@@ -1756,7 +2084,9 @@
         ensurePaneResizers();
         if (showSplit) {
             syncPdfCodeSplitterVisibility();
+            initDocAnnotate();
             layoutMonacoEditors();
+            requestAnimationFrame(() => resizeAnnotateCanvas());
         }
     }
 
@@ -1764,11 +2094,20 @@
         if (!sessOrPdf) return null;
         const rp = sessOrPdf.referencePdf != null ? sessOrPdf.referencePdf : sessOrPdf;
         if (!rp) return null;
-        if (rp.url) return { url: rp.url, originalName: rp.originalName || 'reference.pdf' };
+        if (rp.url) {
+            return {
+                url: rp.url,
+                originalName: rp.originalName || 'reference.pdf',
+                mimeType: rp.mimeType || null,
+                kind: detectReferenceKindClient(rp.originalName, rp.mimeType, rp.kind)
+            };
+        }
         if (rp.storageName) {
             return {
                 url: `/uploads/${rp.storageName}`,
-                originalName: rp.originalName || 'reference.pdf'
+                originalName: rp.originalName || 'reference.pdf',
+                mimeType: rp.mimeType || null,
+                kind: detectReferenceKindClient(rp.originalName, rp.mimeType, rp.kind)
             };
         }
         return null;
@@ -1849,7 +2188,7 @@
 
     function togglePdfSplit(force) {
         if (!state.referencePdf || !state.referencePdf.url) {
-            showToast('No reference PDF — session owner can attach one from File menu', 'info');
+            showToast('No reference document — session owner can attach PDF/DOC/DOCX from File menu', 'info');
             return;
         }
         state.pdfSplitVisible = typeof force === 'boolean' ? force : !state.pdfSplitVisible;
@@ -1898,7 +2237,7 @@
         let data = {};
         try { data = raw ? JSON.parse(raw) : {}; } catch (_) { /* ignore */ }
         if (!res.ok) throw new Error((data && data.error) || `Upload failed (${res.status})`);
-        state.referencePdf = data.referencePdf || null;
+        state.referencePdf = normalizeReferencePdf(data.referencePdf) || null;
         state.pdfSplitVisible = true;
         updateReferencePdfUI();
         if (state.socket && state.socket.connected) {
@@ -1907,7 +2246,7 @@
                 referencePdf: state.referencePdf
             });
         }
-        showToast('Reference PDF attached', 'success');
+        showToast('Reference document attached', 'success');
     }
 
     async function removeSessionPdf() {
@@ -1927,7 +2266,7 @@
                     referencePdf: null
                 });
             }
-            showToast('Reference PDF removed', 'success');
+            showToast('Reference document removed', 'success');
         } catch (err) {
             showToast(err.message || 'Failed to remove PDF', 'error');
         }
@@ -4273,7 +4612,7 @@
             try {
                 await uploadSessionPdf(file);
             } catch (err) {
-                showToast(err.message || 'PDF upload failed', 'error');
+                showToast(err.message || 'Document upload failed', 'error');
             }
         });
         document.getElementById('join-policy-select')?.addEventListener('change', (e) => {
@@ -5899,6 +6238,7 @@
         initResetPassword();
         initDashboard();
         initPaneResizers();
+        initDocAnnotate();
         initEditorToolbar();
         initAdminPanel();
         initPublishViewControls();
