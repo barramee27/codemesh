@@ -2169,17 +2169,17 @@ body.pane-resize-active * {
 .viewer-no-copy .monaco-editor,
 .viewer-no-copy .monaco-editor .view-lines,
 .viewer-no-copy .monaco-editor .margin,
-.session-no-copy .editor-container,
-.session-no-copy .monaco-editor,
-.session-no-copy .monaco-editor .view-lines,
-.session-no-copy .monaco-editor .margin,
-.session-no-copy .monaco-editor .view-overlays,
-.session-no-copy .monaco-editor .selected-text {
+.session-no-select .editor-container,
+.session-no-select .monaco-editor,
+.session-no-select .monaco-editor .view-lines,
+.session-no-select .monaco-editor .margin,
+.session-no-select .monaco-editor .view-overlays,
+.session-no-select .monaco-editor .selected-text {
   -webkit-user-select: none !important;
   user-select: none !important;
 }
 
-.session-no-copy .monaco-editor .cursors-layer .cursor {
+.session-no-select .monaco-editor .cursors-layer .cursor {
   pointer-events: auto;
 }
 

@@ -1198,9 +1198,20 @@
         return state.userRole === 'owner' || state.userRole === 'editor' || state.userRole === 'admin';
     }
 
+    function userIsSessionOwner() {
+        const uid = state.user && (state.user.id || state.user._id);
+        return !!(state.sessionOwnerId && uid && state.sessionOwnerId.toString() === uid.toString());
+    }
+
     function userCanCopySessionCode() {
         if (state.userRole === 'owner' || state.userRole === 'admin') return true;
+        if (state.user && state.user.role === 'admin') return true;
+        if (userIsSessionOwner()) return true;
         return !!state.allowCollaboratorCopy;
+    }
+
+    function userCanSelectSessionCode() {
+        return userCanCopySessionCode() || userCanEditSession();
     }
 
     function copyBlockedMessage() {
@@ -1211,15 +1222,17 @@
 
     let sessionCopyProtectionAbort = null;
 
-    function setSessionCopyProtection(enabled) {
+    function setSessionCopyProtection() {
+        const canCopy = userCanCopySessionCode();
+        const canSelect = userCanSelectSessionCode();
         const primaryPane = document.getElementById('editor-split-pane-primary');
-        primaryPane?.classList.toggle('session-no-copy', enabled);
+        primaryPane?.classList.toggle('session-no-select', !canSelect);
 
         if (sessionCopyProtectionAbort) {
             sessionCopyProtectionAbort.abort();
             sessionCopyProtectionAbort = null;
         }
-        if (!enabled) return;
+        if (canCopy && canSelect) return;
 
         const ac = new AbortController();
         sessionCopyProtectionAbort = ac;
@@ -1237,36 +1250,40 @@
         };
 
         const blockSelection = (e) => {
-            if (userCanCopySessionCode()) return;
+            if (userCanSelectSessionCode()) return;
             e.preventDefault();
         };
 
         for (const el of targets) {
-            el.addEventListener('copy', blockClipboard, opts);
-            el.addEventListener('cut', blockClipboard, opts);
-            el.addEventListener('selectstart', blockSelection, opts);
-            el.addEventListener('contextmenu', (e) => {
-                if (userCanCopySessionCode()) return;
-                e.preventDefault();
-            }, opts);
-            el.addEventListener('dragstart', (e) => {
-                if (userCanCopySessionCode()) return;
-                e.preventDefault();
-            }, opts);
+            if (!canCopy) {
+                el.addEventListener('copy', blockClipboard, opts);
+                el.addEventListener('cut', blockClipboard, opts);
+                el.addEventListener('dragstart', (e) => {
+                    if (userCanCopySessionCode()) return;
+                    e.preventDefault();
+                }, opts);
+            }
+            if (!canSelect) {
+                el.addEventListener('selectstart', blockSelection, opts);
+                el.addEventListener('contextmenu', (e) => {
+                    if (userCanSelectSessionCode()) return;
+                    e.preventDefault();
+                }, opts);
+            }
         }
 
         document.addEventListener('keydown', (e) => {
-            if (userCanCopySessionCode()) return;
             if (state.focusedPane !== 'primary') return;
             const mod = e.ctrlKey || e.metaKey;
             if (!mod) return;
             const key = e.key.toLowerCase();
-            if (key === 'c' || key === 'x' || key === 'a') {
+            if ((key === 'c' || key === 'x') && !userCanCopySessionCode()) {
                 e.preventDefault();
                 e.stopPropagation();
-                if (key === 'c' || key === 'x') {
-                    showToast(copyBlockedMessage(), 'info');
-                }
+                showToast(copyBlockedMessage(), 'info');
+            } else if (key === 'a' && !userCanSelectSessionCode()) {
+                e.preventDefault();
+                e.stopPropagation();
             }
         }, opts);
     }
@@ -1274,22 +1291,22 @@
     function attachSessionEditorCopyGuards(editor, fileId) {
         if (!editor || fileId === SPLIT_SCRATCH_ID) return;
         editor.onKeyDown((e) => {
-            if (userCanCopySessionCode()) return;
             const mod = e.ctrlKey || e.metaKey;
             if (!mod) return;
             const k = e.keyCode;
-            if (k === monaco.KeyCode.KeyC || k === monaco.KeyCode.KeyX || k === monaco.KeyCode.KeyA) {
+            if ((k === monaco.KeyCode.KeyC || k === monaco.KeyCode.KeyX) && !userCanCopySessionCode()) {
                 e.preventDefault();
                 e.stopPropagation();
-                if (k === monaco.KeyCode.KeyC || k === monaco.KeyCode.KeyX) {
-                    showToast(copyBlockedMessage(), 'info');
-                }
+                showToast(copyBlockedMessage(), 'info');
+            } else if (k === monaco.KeyCode.KeyA && !userCanSelectSessionCode()) {
+                e.preventDefault();
+                e.stopPropagation();
             }
         });
     }
 
     function collapseSessionSelection(editor, fileId) {
-        if (!editor || fileId === SPLIT_SCRATCH_ID || userCanCopySessionCode()) return;
+        if (!editor || fileId === SPLIT_SCRATCH_ID || userCanSelectSessionCode()) return;
         const selection = editor.getSelection();
         if (!selection || selection.isEmpty()) return;
         const pos = selection.getPosition();
@@ -1297,14 +1314,14 @@
     }
 
     function updateSessionCopyRestrictions() {
-        const restricted = !userCanCopySessionCode();
-        setSessionCopyProtection(restricted);
+        setSessionCopyProtection();
         updateCopyRestrictedUI();
         const canCopySession = userCanCopySessionCode();
+        const canSelectSession = userCanSelectSessionCode();
         if (state.editorView) {
             state.editorView.updateOptions({
                 selectionClipboard: canCopySession,
-                selectionHighlight: canCopySession
+                selectionHighlight: canSelectSession
             });
         }
         if (state.splitEditor) {
@@ -1755,8 +1772,7 @@
     function userCanManageSessionSettings() {
         if (state.userRole === 'owner' || state.userRole === 'admin') return true;
         if (state.user && state.user.role === 'admin') return true;
-        const uid = state.user && (state.user.id || state.user._id);
-        return !!(state.sessionOwnerId && uid && state.sessionOwnerId.toString() === uid.toString());
+        return userIsSessionOwner();
     }
 
     function userCanViewSessionCode() {
@@ -3362,7 +3378,7 @@
             wordWrap: "on",
             padding: { top: 10 },
             selectionClipboard: fileId === SPLIT_SCRATCH_ID || userCanCopySessionCode(),
-            selectionHighlight: fileId === SPLIT_SCRATCH_ID || userCanCopySessionCode()
+            selectionHighlight: fileId === SPLIT_SCRATCH_ID || userCanSelectSessionCode()
         });
 
         editor.onDidChangeModelContent((e) => {
@@ -3374,7 +3390,7 @@
         });
 
         editor.onDidChangeCursorSelection((e) => {
-            if (!userCanCopySessionCode() && fileId !== SPLIT_SCRATCH_ID && !e.selection.isEmpty()) {
+            if (!userCanSelectSessionCode() && fileId !== SPLIT_SCRATCH_ID && !e.selection.isEmpty()) {
                 collapseSessionSelection(editor, fileId);
                 return;
             }
@@ -3675,9 +3691,6 @@
             }
 
             const firstFromApi = hydrateFilesFromSessionPayload(sessionData);
-            if (firstFromApi) {
-                openFile(firstFromApi);
-            }
 
             applySessionMeta({
                 defaultJoinRole: sessionData.defaultJoinRole,
@@ -3691,6 +3704,14 @@
                 guestCodeVisibility: sessionData.guestCodeVisibility,
                 codeHiddenFromGuest: sessionData.codeHiddenFromGuest
             });
+            if (userIsSessionOwner()) {
+                state.userRole = 'owner';
+                updateRoleBadge('owner');
+            }
+
+            if (firstFromApi) {
+                openFile(firstFromApi);
+            }
 
             // Connect WebSocket
             connectSocket(sessionId, sessionData, socketClassKey);
