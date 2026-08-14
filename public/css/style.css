@@ -2238,10 +2238,26 @@ body.pane-resize-active * {
 }
 
 /* ═══════════ ADMIN PANEL ═══════════ */
+#admin-view {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+#admin-view .navbar {
+  flex-shrink: 0;
+}
+
 .admin-content {
+  flex: 1;
+  min-height: 0;
   padding: 24px;
   max-width: 1400px;
+  width: 100%;
   margin: 0 auto;
+  overflow-y: auto;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 .admin-tabs {
@@ -2294,7 +2310,7 @@ body.pane-resize-active * {
   background: var(--bg-card);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  overflow: hidden;
+  overflow-x: auto;
 }
 
 .admin-table {
